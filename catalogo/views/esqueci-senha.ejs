@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Recuperar Senha</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+</head>
+<body>
+  <main class="container" style="max-width: 500px; margin-top: 50px;">
+    <article>
+      <h2>Recuperar Senha</h2>
+      <p>Digite seu e-mail cadastrado para receber o link de redefinição (válido por 30 minutos).</p>
+      
+      <form action="/esqueci-senha" method="POST">
+        <label for="email">E-mail</label>
+        <input type="email" id="email" name="email" placeholder="seu@email.com" required>
+        
+        <button type="submit">Enviar Link de Recuperação</button>
+      </form>
+    </article>
+  </main>
+</body>
+</html>

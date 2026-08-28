@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redefinir Senha</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+</head>
+<body>
+  <main class="container" style="max-width: 500px; margin-top: 50px;">
+    <article>
+      <h2>Criar Nova Senha</h2>
+      
+      <form action="/redefinir-senha" method="POST">
+        <input type="hidden" id="token" name="token">
+        
+        <label for="novaSenha">Nova Senha</label>
+        <input type="password" id="novaSenha" name="novaSenha" placeholder="Digite sua nova senha" required>
+        
+        <button type="submit">Salvar Nova Senha</button>
+      </form>
+    </article>
+  </main>
+
+  <script>
+    // Captura o token da URL (?token=xyz) e coloca no formulário automaticamente
+    const urlParams = new URLSearchParams(window.location.search);
+    document.getElementById('token').value = urlParams.get('token') || '';
+  </script>
+</body>
+</html>

@@ -1,16 +1,53 @@
-version: '3.8'
-
 services:
-  web:
-    build: .
+  catalogo:
+    build: ./catalogo
+    container_name: catalogo_app
     ports:
-      - "${PORT_HOST:-8204}:3000"
+      - "8080:8080"
     environment:
-      - PORT=3000
-      - SESSION_SECRET=${SESSION_SECRET}
-      - TMDB_API_KEY=${TMDB_API_KEY}
-      - DB_HOST=${DB_HOST}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_NAME=${DB_NAME}
-    restart: always
+      - AUTH_SERVICE_URL=http://auth-service:3000
+      - DB_HOST=db
+      - DB_USER=root
+      - DB_PASSWORD=root_password
+      - DB_NAME=app_db
+    networks:
+      - rede-interna
+    depends_on:
+      - auth-service
+      - db
+
+  auth-service:
+    build: ./auth-service
+    container_name: auth_app
+    environment:
+      - DB_HOST=db
+      - DB_USER=root
+      - DB_PASSWORD=root_password
+      - DB_NAME=app_db
+      - SMTP_HOST=sandbox.smtp.mailtrap.io
+      - SMTP_PORT=2525
+      - SMTP_USER=9bd07c441f6778
+      - SMTP_PASS=e76d9b0b30bfe3
+    networks:
+      - rede-interna
+    depends_on:
+      - db
+
+  db:
+    image: mariadb:10.11
+    container_name: mariadb_app
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: app_db
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - db_data:/var/lib/mysql
+    networks:
+      - rede-interna
+
+networks:
+  rede-interna:
+    driver: bridge
+
+volumes:
+  db_data:
