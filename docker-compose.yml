@@ -4,9 +4,8 @@ services:
   # SERVIÇO 1: Catálogo de Filmes (Único Ponto de Entrada Público)
   web:
     build: .
-    container_name: catalogo-filmes
     ports:
-      - "${PORT_HOST:-8204}:3000"
+      - "${PORT_HOST:-${PORT:-8204}}:3000"
     environment:
       - PORT=3000
       - AUTH_SERVICE_URL=http://auth-service:3001
@@ -26,7 +25,6 @@ services:
   # SERVIÇO 2: Microsserviço de Autenticação (Acessível APENAS internamente)
   auth-service:
     build: ./auth-service
-    container_name: auth-service
     # ATENÇÃO: Nenhuma porta mapeada pro host (sem ports:), visível apenas na rede Docker interna
     environment:
       - PORT=3001
