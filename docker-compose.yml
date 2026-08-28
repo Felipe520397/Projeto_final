@@ -1,53 +1,50 @@
+version: '3.8'
+
 services:
-  catalogo:
-    build: ./catalogo
-    container_name: catalogo_app
+  # SERVIÇO 1: Catálogo de Filmes (Único Ponto de Entrada Público)
+  web:
+    build: .
+    container_name: catalogo-filmes
     ports:
-      - "8080:8080"
+      - "${PORT_HOST:-8204}:3000"
     environment:
-      - AUTH_SERVICE_URL=http://auth-service:3000
-      - DB_HOST=db
-      - DB_USER=root
-      - DB_PASSWORD=root_password
-      - DB_NAME=app_db
-    networks:
-      - rede-interna
+      - PORT=3000
+      - AUTH_SERVICE_URL=http://auth-service:3001
+      - SESSION_SECRET=${SESSION_SECRET}
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - DB_HOST=${DB_HOST}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - DB_PORT=${DB_PORT:-3306}
     depends_on:
       - auth-service
-      - db
+    networks:
+      - app-network
+    restart: always
 
+  # SERVIÇO 2: Microsserviço de Autenticação (Acessível APENAS internamente)
   auth-service:
     build: ./auth-service
-    container_name: auth_app
+    container_name: auth-service
+    # ATENÇÃO: Nenhuma porta mapeada pro host (sem ports:), visível apenas na rede Docker interna
     environment:
-      - DB_HOST=db
-      - DB_USER=root
-      - DB_PASSWORD=root_password
-      - DB_NAME=app_db
-      - SMTP_HOST=sandbox.smtp.mailtrap.io
-      - SMTP_PORT=2525
-      - SMTP_USER=9bd07c441f6778
-      - SMTP_PASS=e76d9b0b30bfe3
+      - PORT=3001
+      - DB_HOST=${DB_HOST}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - DB_PORT=${DB_PORT:-3306}
+      - SMTP_HOST=${SMTP_HOST:-sandbox.smtp.mailtrap.io}
+      - SMTP_PORT=${SMTP_PORT:-2525}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_FROM=${SMTP_FROM:-"Catálogo Tom Hanks <no-reply@catalogofilmes.com>"}
+      - APP_URL=${APP_URL:-http://localhost:8204}
     networks:
-      - rede-interna
-    depends_on:
-      - db
-
-  db:
-    image: mariadb:10.11
-    container_name: mariadb_app
-    environment:
-      MYSQL_ROOT_PASSWORD: root_password
-      MYSQL_DATABASE: app_db
-    volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-      - db_data:/var/lib/mysql
-    networks:
-      - rede-interna
+      - app-network
+    restart: always
 
 networks:
-  rede-interna:
+  app-network:
     driver: bridge
-
-volumes:
-  db_data:

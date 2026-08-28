@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cadastro - Catálogo de Filmes</title>
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px 20px; background: #141414; color: #fff; }
+    .card { max-width: 420px; margin: 40px auto; padding: 30px; background: #222; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+    h2 { margin-top: 0; color: #46d369; text-align: center; }
+    label { display: block; margin-top: 12px; font-size: 0.9em; color: #ccc; }
+    input, select { width: 100%; padding: 10px; margin: 6px 0 12px 0; box-sizing: border-box; background: #333; border: 1px solid #444; color: white; border-radius: 4px; font-size: 0.95em; }
+    input:focus, select:focus { outline: none; border-color: #46d369; }
+    select option { background: #222; color: #fff; }
+    button { width: 100%; padding: 12px; background: #28a745; color: white; border: none; border-radius: 4px; font-size: 1em; font-weight: bold; cursor: pointer; margin-top: 10px; transition: background 0.2s; }
+    button:hover { background: #218838; }
+    .erro { background: rgba(255, 77, 77, 0.15); border: 1px solid #ff4d4d; color: #ff8080; padding: 10px; border-radius: 4px; font-size: 0.9em; margin-bottom: 15px; }
+    .links { margin-top: 20px; text-align: center; font-size: 0.9em; color: #aaa; }
+    .links a { color: #007bff; text-decoration: none; }
+    .links a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Criar Nova Conta</h2>
+    
+    <% if (locals.erro) { %>
+      <div class="erro">⚠️ <%= erro %></div>
+    <% } %>
+
+    <form action="/cadastro" method="POST">
+      <label>Nome:</label>
+      <input type="text" name="nome" placeholder="Seu nome completo" required>
+
+      <label>E-mail:</label>
+      <input type="email" name="email" placeholder="exemplo@email.com" required>
+
+      <label>Senha:</label>
+      <input type="password" name="senha" placeholder="Crie uma senha segura" required>
+
+      <label>Perfil de Acesso (Role):</label>
+      <select name="role">
+        <option value="usuario" selected>Usuário (Padrão)</option>
+        <option value="admin">Administrador (Admin)</option>
+      </select>
+
+      <button type="submit">Cadastrar</button>
+    </form>
+
+    <div class="links">
+      <p>Já tem uma conta? <a href="/login">Faça Login</a></p>
+    </div>
+  </div>
+</body>
+</html>
