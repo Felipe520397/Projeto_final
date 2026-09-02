@@ -395,13 +395,30 @@ app.post('/comentarios/:id/deletar', checkAuth, async (req, res) => {
 // ROTAS ADMINISTRATIVAS (EXCLUSIVAS PARA ADMIN)
 // ==========================================
 
-// Painel de Gerenciamento de Usuários
+// Painel de Gerenciamento de Usuários e Moderação de Comentários
+app.get('/admin', requireAdmin, (req, res) => res.redirect('/admin/usuarios'));
+
 app.get('/admin/usuarios', requireAdmin, async (req, res) => {
   try {
+    // 1. Busca usuários no microsserviço de autenticação
     const response = await axios.get(`${AUTH_SERVICE_URL}/auth/users`);
+    const usuarios = response.data.users || [];
+
+    // 2. Busca todos os comentários postados no catálogo para moderação
+    let todosComentarios = [];
+    try {
+      const [rows] = await pool.query(
+        'SELECT id, usuario_id, usuario_nome, filme_id, texto, criado_em FROM comentarios ORDER BY criado_em DESC'
+      );
+      todosComentarios = rows;
+    } catch (cErr) {
+      console.warn('[Admin] Aviso ao buscar comentários:', cErr.message);
+    }
+
     res.render('admin-usuarios', {
       usuario: req.session.usuario,
-      usuarios: response.data.users || [],
+      usuarios,
+      comentarios: todosComentarios,
       sucesso: req.query.sucesso || null,
       erro: req.query.erro || null
     });
@@ -410,8 +427,9 @@ app.get('/admin/usuarios', requireAdmin, async (req, res) => {
     res.render('admin-usuarios', {
       usuario: req.session.usuario,
       usuarios: [],
+      comentarios: [],
       sucesso: null,
-      erro: 'Não foi possível carregar os usuários do serviço de autenticação.'
+      erro: 'Não foi possível carregar os dados do serviço de autenticação.'
     });
   }
 });
