@@ -1,16 +1,87 @@
-# Catálogo de Filmes — Tom Hanks (Microsserviço Desacoplado)
+# Catálogo de Filmes — Tom Hanks (Microsserviço Desacoplado & RBAC)
 
 Aplicação desenvolvida para a disciplina **ISW055 - Introdução à Computação em Nuvem**, ministrada pelo professor **[@siriani](https://github.com/siriani)** ([github.com/siriani](https://github.com/siriani)).
 
 ---
 
-## 📌 Sobre a Atividade 3 — Serviços Desacoplados
+## 📌 Evolução do Projeto
 
-Na **Atividade 2**, o sistema rodava como um monólito em um único container (catálogo, login, cadastro, papéis de usuário, favoritos e comentários no mesmo processo).
+- **Atividade 2**: Monólito em 1 container (Catálogo, autenticação, banco e regras no mesmo processo).
+- **Atividade 3**: Desacoplamento em 2 containers (`web` e `auth-service`) com comunicação em rede interna Docker, roles e recuperação de senha com tokens de 30 minutos via SMTP (Mailtrap/Brevo/Gmail).
+- **Atividade 4 (Atual)**: **Controle de Acesso Baseado em Papel (*Role-Based Access Control* - RBAC)** com enforcement estrito no backend (HTTP 403).
 
-Nesta **Atividade 3**, a aplicação foi refatorada e desacoplada em **2 microsserviços independentes**:
-1. **`web` (Catálogo de Filmes)**: Único container público, responsável pelo catálogo, favoritos, comentários e integração SSR/TMDB.
-2. **`auth-service` (Microsserviço de Autenticação)**: Serviço isolado, responsável por login, cadastro, papéis de usuário (*roles*) e recuperação de senha por e-mail com tokens temporários (30 minutos).
+---
+
+## 🛡️ Atividade 4 — Controle de Acesso por Papel (RBAC de Verdade)
+
+### 1. Matriz de Permissões por Papel (Requisito 1)
+
+O sistema possui dois papéis bem definidos (`usuario` e `admin`). As permissões atribuídas a cada papel são:
+
+| Recurso | Ação | Permissão Técnica | Papel `usuario` | Papel `admin` |
+| :--- | :--- | :--- | :---: | :---: |
+| **Catálogo** | Visualizar lista e detalhes de filmes | `catalogo:visualizar` | ✅ Permitido | ✅ Permitido |
+| **Favoritos** | Adicionar ou remover filmes dos favoritos | `favoritos:gerenciar` | ✅ Permitido | ✅ Permitido |
+| **Comentários** | Criar novo comentário em um filme | `comentarios:criar` | ✅ Permitido | ✅ Permitido |
+| **Comentários** | Excluir o **próprio** comentário | `comentarios:apagar:proprio` | ✅ Permitido | ✅ Permitido |
+| **Comentários** | Excluir comentário de **qualquer usuário** (Moderação) | `comentarios:apagar:qualquer` | ❌ **Negado (403)** | ✅ Permitido |
+| **Usuários** | Listar todos os usuários do sistema | `usuarios:listar` | ❌ **Negado (403)** | ✅ Permitido |
+| **Usuários** | Alterar papel (*role*) de usuários (Promover/Rebaixar) | `usuarios:alterar-role` | ❌ **Negado (403)** | ✅ Permitido |
+| **Senha** | Redefinir sua própria senha por e-mail | `senha:redefinir` | ✅ Permitido | ✅ Permitido |
+
+---
+
+### 2. Ações Exclusivas de Administrador (Requisito 2)
+
+Foram implementadas duas ações exclusivas para administradores:
+1. **Moderação Global de Comentários (`POST /comentarios/:id/deletar`)**:
+   - Um usuário comum só pode apagar comentários criados por ele mesmo (`usuario_id === req.session.usuario.id`).
+   - O administrador tem o poder de moderação para apagar comentários de qualquer usuário.
+2. **Painel de Gestão de Usuários e Roles (`/admin/usuarios` e `POST /admin/usuarios/:id/role`)**:
+   - Acesso exclusivo para administradores visualizarem todos os usuários e promoverem/rebaixarem contas entre `usuario` e `admin`.
+
+---
+
+### 3. Enforcement Estrito no Backend (Requisito 3)
+
+A segurança **não depende apenas de esconder botões na interface**. A validação é sempre executada no servidor:
+
+```javascript
+// Exemplo no Catálogo (server.js):
+const isOwner = (comentario.usuario_id === req.session.usuario.id);
+const isAdmin = (req.session.usuario.role === 'admin');
+
+if (!isOwner && !isAdmin) {
+  return res.status(403).render('403', {
+    usuario: req.session.usuario,
+    mensagem: 'Acesso Negado (HTTP 403): Você não tem permissão para excluir o comentário de outro usuário.'
+  });
+}
+```
+
+Se um usuário com papel `usuario` tentar forçar a chamada de uma rota administrativa via Postman, curl ou DevTools:
+- Rota Web: Renderiza a tela estilizada **`403 Forbidden`** com código HTTP 403.
+- Rota API no Auth-Service: Retorna JSON `{ success: false, error: 'Acesso negado (HTTP 403)...' }` com status 403.
+
+---
+
+### 4. Análise Arquitetural: Padrão A vs Padrão B (Requisito 5)
+
+#### Qual padrão o projeto utiliza hoje?
+O projeto utiliza o **PADRÃO A (Enforcement Centralizado)**.
+- O catálogo mantém a sessão do usuário e valida o papel em tempo de execução junto aos dados do microsserviço de autenticação e banco de dados.
+- **Vantagem**: Revogação e atualização de permissões **imediatas**. Se um administrador rebaixar um usuário de `admin` para `usuario` no painel, a perda de permissão passa a valer instantaneamente na próxima requisição do usuário.
+- **Trade-off**: Requer verificação de estado ou comunicação entre serviços.
+
+#### O que mudaria se o projeto migrasse para o PADRÃO B (Claims no Token JWT)?
+- No momento do login, o `auth-service` geraria um token assinado (JWT) contendo as informações do usuário e suas permissões no payload (ex: `{ id, nome, email, role: 'admin' }`).
+- O catálogo não precisaria de sessões no servidor nem de chamadas extras ao `auth-service` para verificar o papel: bastaria validar a assinatura criptográfica do JWT usando uma chave secreta compartilhada (`JWT_SECRET`).
+- **Vantagem**: Redução de chamadas de rede e maior velocidade de resposta.
+- **Trade-off**: Se o papel de um usuário for alterado no banco de dados, o usuário continuará com as permissões antigas até que o token JWT expire e seja renovado.
+
+---
+
+## 🏗️ Arquitetura do Sistema
 
 ```
 +-------------------------------------------------------------------------+
@@ -22,9 +93,9 @@ Nesta **Atividade 3**, a aplicação foi refatorada e desacoplada em **2 micross
                                      v
 +------------------------------------+------------------------------------+
 | CONTAINER 1: CATALOG-SERVICE (Ponto de Entrada Público)                 |
-| - Renderiza SSR (EJS): Login, Cadastro, Esqueci Senha, Home, Favoritos  |
+| - SSR EJS: Login, Cadastro, Esqueci Senha, Home, Painel Admin (RBAC)    |
 | - Consome API do TMDB no backend                                        |
-| - Gerencia Sessões e Favoritos/Comentários no MariaDB                   |
+| - Gerencia Sessões, Favoritos e Comentários (com Moderação)             |
 +------------------------------------+------------------------------------+
                                      |
                                      | Rede Interna Docker (bridge: app-network)
@@ -32,16 +103,15 @@ Nesta **Atividade 3**, a aplicação foi refatorada e desacoplada em **2 micross
                                      v
 +------------------------------------+------------------------------------+
 | CONTAINER 2: AUTH-SERVICE (Sem Porta Pública Exposta)                  |
-| - Gerencia Usuários (Login, Cadastro, Roles: usuario / admin)           |
-| - Gerencia Tokens de Recuperação de Senha (tabela reset_tokens)         |
-| - Validação de expiração (30 minutos) e uso único                       |
-| - Integração SMTP (Mailtrap em dev / Brevo em prod)                     |
+| - Gerencia Usuários e Roles (usuario / admin)                           |
+| - Gerencia Tokens de Recuperação de Senha (expiração em 30 min)        |
+| - Envio de e-mails via SMTP (Mailtrap / Brevo / Gmail)                  |
 +------------------+------------------------------------+-----------------+
                    |                                    |
                    v                                    v
 +------------------+---------------+   +----------------+-----------------+
 |          BANCO DE DADOS          |   |          SMTP EXTERNO            |
-|             MariaDB              |   |   Mailtrap (dev) / Brevo (prod)  |
+|             MariaDB              |   |  Mailtrap / Brevo / Gmail SMTP   |
 | - usuarios (com role)            |   +----------------------------------+
 | - reset_tokens                   |
 | - favoritos & comentarios        |
@@ -50,202 +120,44 @@ Nesta **Atividade 3**, a aplicação foi refatorada e desacoplada em **2 micross
 
 ---
 
-## 🔒 Segurança e Comunicação por Rede Interna
-
-- **Isolamento de Portas**: O `auth-service` **NÃO possui portas mapeadas para o host** (`ports:` não é declarado para este serviço no `docker-compose.yml`). Ele é acessível estritamente através da rede interna do Docker (`app-network`).
-- **Ponto de Entrada Único**: Apenas o container do Catálogo expõe porta para a internet (`${PORT_HOST:-8204}:3000`).
-- **Segurança das Chaves**: A chave da API do TMDB e as credenciais SMTP nunca são expostas ao cliente, operando 100% no backend.
-- **Senhas com Hash**: Criptografia de senhas utilizando `bcryptjs` (salt rounds = 10).
-
----
-
-## 👥 Papéis de Usuário (Roles)
-
-O sistema suporta múltiplos níveis de acesso:
-- **`usuario` (padrão)**: Acesso padrão ao catálogo, favoritos e comentários.
-- **`admin`**: Perfil administrativo com badge destacado no cabeçalho.
-
-Ao realizar login ou cadastro, o `auth-service` responde com o papel do usuário, que é mantido na sessão.
-
----
-
-## ✉️ Esqueci Minha Senha — Expiração Real e Envio de E-mail
-
-O fluxo de recuperação de senha funciona da seguinte forma:
-
-1. **Solicitação**: O usuário informa seu e-mail no formulário `/esqueci-senha`.
-2. **Geração de Token Único**: O `auth-service` gera um token criptográfico aleatório de 32 bytes (64 caracteres hexadecimais).
-3. **Persistência com Expiração Real**:
-   - Salvo na tabela `reset_tokens`.
-   - `expira_em` = `NOW() + 30 minutos`.
-   - `usado` = `0` (false).
-4. **Envio Real por E-mail**:
-   - **Ambiente de Desenvolvimento**: Integrado ao **Mailtrap** (SMTP Sandbox).
-   - **Ambiente de Produção**: Compatível com **Brevo** ou qualquer servidor SMTP transacional.
-5. **Validação Rigorosa (3 critérios obrigatórios)**:
-   Quando o usuário clica no link recebido (`/redefinir-senha?token=...`) e envia a nova senha:
-   - ❌ **Token existe?** Se não existir, a operação é rejeitada.
-   - ❌ **Não expirou?** Se a data atual ultrapassar `expira_em` (> 30 min), a troca é recusada com aviso de expiração.
-   - ❌ **Não foi usado?** Se `usado == 1`, a tentativa de reutilização é bloqueada.
-   - ✅ Se todos os critérios forem atendidos, a nova senha é gravada no banco e o token é marcado como `usado = 1`.
-
----
-
-## 🗄️ Estrutura do Banco de Dados
-
-### Tabela `usuarios`
-```sql
-CREATE TABLE usuarios (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  nome VARCHAR(255) NOT NULL,
-  email VARCHAR(255) NOT NULL UNIQUE,
-  senha_hash VARCHAR(255) NOT NULL,
-  role VARCHAR(50) NOT NULL DEFAULT 'usuario',
-  criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-### Tabela `reset_tokens`
-```sql
-CREATE TABLE reset_tokens (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  token VARCHAR(255) NOT NULL UNIQUE,
-  usuario_id INT NOT NULL,
-  criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  expira_em DATETIME NOT NULL,
-  usado TINYINT(1) NOT NULL DEFAULT 0,
-  FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
-);
-```
-
-### Tabelas `favoritos` e `comentarios`
-Mantêm a persistência e segregação multi-tenant por `usuario_id`.
-
----
-
-## 🐳 Configuração do `docker-compose.yml`
-
-```yaml
-version: '3.8'
-
-services:
-  web:
-    build: .
-    container_name: catalogo-filmes
-    ports:
-      - "${PORT_HOST:-8204}:3000"
-    environment:
-      - PORT=3000
-      - AUTH_SERVICE_URL=http://auth-service:3001
-      - SESSION_SECRET=${SESSION_SECRET}
-      - TMDB_API_KEY=${TMDB_API_KEY}
-      - DB_HOST=${DB_HOST}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_NAME=${DB_NAME}
-      - DB_PORT=${DB_PORT:-3306}
-    depends_on:
-      - auth-service
-    networks:
-      - app-network
-    restart: always
-
-  auth-service:
-    build: ./auth-service
-    container_name: auth-service
-    # Sem portas publicadas pro host (isolamento de rede)
-    environment:
-      - PORT=3001
-      - DB_HOST=${DB_HOST}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_NAME=${DB_NAME}
-      - DB_PORT=${DB_PORT:-3306}
-      - SMTP_HOST=${SMTP_HOST:-sandbox.smtp.mailtrap.io}
-      - SMTP_PORT=${SMTP_PORT:-2525}
-      - SMTP_USER=${SMTP_USER}
-      - SMTP_PASS=${SMTP_PASS}
-      - SMTP_FROM=${SMTP_FROM:-"Catálogo Tom Hanks <no-reply@catalogofilmes.com>"}
-      - APP_URL=${APP_URL:-http://localhost:8204}
-    networks:
-      - app-network
-    restart: always
-
-networks:
-  app-network:
-    driver: bridge
-```
-
----
-
 ## ⚙️ Variáveis de Ambiente (`.env`)
-
-Copie o arquivo `.env.example` para `.env` e preencha com as suas configurações:
 
 ```env
 # Porta no Host
+PORT=8204
 PORT_HOST=8204
 SESSION_SECRET=minha_chave_secreta_segura
 TMDB_API_KEY=sua_chave_do_tmdb
 
 # MariaDB
-DB_HOST=mariadb_ou_ip
+DB_HOST=35.226.64.52
 DB_PORT=3306
-DB_USER=root
+DB_USER=seu_usuario
 DB_PASSWORD=sua_senha
-DB_NAME=filmes_db
+DB_NAME=seu_banco
 
-# Mailtrap SMTP (Desenvolvimento)
-SMTP_HOST=sandbox.smtp.mailtrap.io
-SMTP_PORT=2525
-SMTP_USER=seu_user_mailtrap
-SMTP_PASS=sua_pass_mailtrap
-SMTP_FROM="Catálogo Tom Hanks <no-reply@catalogofilmes.com>"
+# Configurações SMTP
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=seuemail@gmail.com
+SMTP_PASS=sua_senha_de_app
+SMTP_FROM="Catálogo Tom Hanks <seuemail@gmail.com>"
 
 # URL Pública
-APP_URL=http://localhost:8204
+APP_URL=http://35.226.64.52:8204
 ```
 
 ---
 
-## 🚀 Como Executar o Projeto
+## 🧪 Demonstração dos Testes (Requisito 4)
 
-1. Clone o repositório:
-```bash
-git clone <URL_DO_REPOSITORIO>
-cd "filmes tom hanks"
-```
+1. **Teste com Usuário Comum (`usuario`)**:
+   - Cadastre e faça login com uma conta com papel `usuario`.
+   - Adicione um comentário em um filme. Observe que você pode apagar o seu próprio comentário (`🗑️`).
+   - Tente apagar o comentário de outro usuário (o botão não existe e chamada direta via POST resulta em **HTTP 403 Forbidden**).
+   - Tente acessar `/admin/usuarios` diretamente pela URL ➔ O sistema bloqueia com **HTTP 403 Forbidden**.
 
-2. Crie e configure o arquivo `.env`:
-```bash
-cp .env.example .env
-```
-
-3. Suba os containers com o Docker Compose:
-```bash
-docker compose up -d --build
-```
-
-4. Acesse a aplicação no navegador:
-```
-http://localhost:8204
-```
-
----
-
-## 🧪 Demonstração dos Testes e Validação
-
-1. **Cadastro e Login**:
-   - Cadastre uma conta como `usuario` e outra como `admin`.
-   - Observe o papel atribuído exibido no badge do cabeçalho da página `/home`.
-2. **Recuperação de Senha por E-mail**:
-   - Clique em *"Esqueci minha senha"*.
-   - Informe o e-mail cadastrado e envie.
-   - Abra a caixa de entrada no **Mailtrap** e clique no botão *"Redefinir Minha Senha"*.
-   - Digite a nova senha e confirme.
-   - Faça login com a nova senha.
-3. **Tentativa de Reutilização**:
-   - Tente abrir novamente o mesmo link do e-mail ou reenviar o formulário.
-   - O sistema rejeita com a mensagem: `⚠️ Este link de recuperação já foi utilizado.`
-4. **Tentativa de Uso após Expiração (> 30 min)**:
-   - Tokens com mais de 30 minutos desde a criação são rejeitados com a mensagem: `⚠️ Este link de recuperação expirou (ultrapassou o prazo de 30 minutos).`
+2. **Teste com Administrador (`admin`)**:
+   - Faça login com uma conta com papel `admin`.
+   - Acesse o catálogo: você verá o botão **`🗑️ Excluir (Admin)`** em comentários de qualquer usuário e poderá excluí-los com sucesso.
+   - Clique em **`🛡️ Painel Admin`** no cabeçalho: visualize a lista completa de usuários e altere papéis (*Promover a Admin* ou *Rebaixar para Usuário*).

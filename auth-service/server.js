@@ -139,6 +139,55 @@ app.get('/auth/user-role/:id', async (req, res) => {
 });
 
 /**
+ * ROTA: Listar todos os usuários (Exclusivo Admin)
+ * GET /auth/users
+ */
+app.get('/auth/users', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT id, nome, email, role, criado_em FROM usuarios ORDER BY id ASC');
+    return res.json({ success: true, users: rows });
+  } catch (error) {
+    console.error('[Auth-Service] Erro ao listar usuários:', error);
+    return res.status(500).json({ success: false, error: 'Erro ao listar usuários.' });
+  }
+});
+
+/**
+ * ROTA: Alterar papel (role) de um usuário (Exclusivo Admin - Enforcement 403)
+ * POST /auth/users/:id/role
+ * Body: { role, requesterRole }
+ */
+app.post('/auth/users/:id/role', async (req, res) => {
+  const { id } = req.params;
+  const { role, requesterRole } = req.body;
+
+  // Validação no servidor: apenas admin pode alterar papéis
+  if (requesterRole !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      error: 'Acesso negado (HTTP 403): apenas administradores têm permissão para alterar papéis de usuários.'
+    });
+  }
+
+  if (!['usuario', 'admin'].includes(role)) {
+    return res.status(400).json({ success: false, error: 'Papel inválido. Deve ser "usuario" ou "admin".' });
+  }
+
+  try {
+    const [result] = await pool.query('UPDATE usuarios SET role = ? WHERE id = ?', [role, id]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, error: 'Usuário não encontrado.' });
+    }
+
+    console.log(`[Auth-Service] Papel do usuário ID ${id} alterado para "${role}".`);
+    return res.json({ success: true, message: `Papel do usuário atualizado para "${role}" com sucesso!` });
+  } catch (error) {
+    console.error('[Auth-Service] Erro ao alterar papel:', error);
+    return res.status(500).json({ success: false, error: 'Erro interno ao alterar papel do usuário.' });
+  }
+});
+
+/**
  * ROTA: Esqueci minha senha (Gera token de 30 minutos e envia e-mail)
  * POST /auth/forgot-password
  * Body: { email, appUrl }

@@ -37,6 +37,8 @@ const pool = mysql.createPool({
 async function initCatalogDb() {
   try {
     const conn = await pool.getConnection();
+    
+    // Tabela de favoritos
     await conn.query(`
       CREATE TABLE IF NOT EXISTS favoritos (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -49,15 +51,28 @@ async function initCatalogDb() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
+    // Tabela de comentários
     await conn.query(`
       CREATE TABLE IF NOT EXISTS comentarios (
         id INT AUTO_INCREMENT PRIMARY KEY,
         usuario_id INT NOT NULL,
+        usuario_nome VARCHAR(255),
         filme_id INT NOT NULL,
         texto TEXT NOT NULL,
         criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
+
+    // Garante que a coluna usuario_nome exista caso a tabela já tenha sido criada anteriormente
+    try {
+      const [cols] = await conn.query("SHOW COLUMNS FROM comentarios LIKE 'usuario_nome'");
+      if (cols.length === 0) {
+        await conn.query("ALTER TABLE comentarios ADD COLUMN usuario_nome VARCHAR(255) DEFAULT 'Usuário'");
+      }
+    } catch (colErr) {
+      console.warn('[Catalog DB] Aviso coluna usuario_nome:', colErr.message);
+    }
+
     conn.release();
     console.log('[Catalog DB] Tabelas "favoritos" e "comentarios" prontas.');
   } catch (err) {
@@ -66,13 +81,30 @@ async function initCatalogDb() {
 }
 initCatalogDb();
 
-// Middleware de verificação de autenticação
+// Middleware de Autenticação (Quem é você?)
 function checkAuth(req, res, next) {
   if (req.session.usuario) {
     next();
   } else {
     res.redirect('/login');
   }
+}
+
+// Middleware de Autorização RBAC (O que você pode fazer?)
+function requireAdmin(req, res, next) {
+  if (!req.session.usuario) {
+    return res.redirect('/login');
+  }
+  
+  // Validação estrita no servidor (Enforcement de RBAC)
+  if (req.session.usuario.role !== 'admin') {
+    return res.status(403).render('403', {
+      usuario: req.session.usuario,
+      mensagem: 'Acesso Negado (HTTP 403): Esta ação ou página é restrita a Administradores do sistema.'
+    });
+  }
+
+  next();
 }
 
 // ==========================================
@@ -231,18 +263,23 @@ app.get('/home', checkAuth, async (req, res) => {
     }
     const favMap = new Set(favoritos.map(f => f.filme_id));
 
-    // 2. Busca comentários do usuário logado
+    // 2. Busca todos os comentários (com autor e ID) para permitir exibição e moderação
     const commMap = {};
     try {
       const [comentarios] = await pool.query(
-        'SELECT filme_id, texto FROM comentarios WHERE usuario_id = ?',
-        [req.session.usuario.id]
+        'SELECT id, usuario_id, usuario_nome, filme_id, texto, criado_em FROM comentarios ORDER BY criado_em ASC'
       );
       comentarios.forEach(c => {
         if (!commMap[c.filme_id]) {
           commMap[c.filme_id] = [];
         }
-        commMap[c.filme_id].push(c.texto);
+        commMap[c.filme_id].push({
+          id: c.id,
+          usuario_id: c.usuario_id,
+          usuario_nome: c.usuario_nome || 'Usuário',
+          texto: c.texto,
+          criado_em: c.criado_em
+        });
       });
     } catch (dbErr) {
       console.log('Aviso comentarios:', dbErr.message);
@@ -313,14 +350,87 @@ app.post('/comentar', checkAuth, async (req, res) => {
   try {
     if (texto && texto.trim() !== '') {
       await pool.query(
-        'INSERT INTO comentarios (usuario_id, filme_id, texto) VALUES (?, ?, ?)',
-        [req.session.usuario.id, filme_id, texto]
+        'INSERT INTO comentarios (usuario_id, usuario_nome, filme_id, texto) VALUES (?, ?, ?, ?)',
+        [req.session.usuario.id, req.session.usuario.nome, filme_id, texto.trim()]
       );
     }
     res.redirect('/home');
   } catch (error) {
     console.error('Erro ao comentar:', error);
     res.redirect('/home');
+  }
+});
+
+// Excluir Comentário (RBAC: Usuário pode apagar o próprio; Admin pode apagar qualquer um)
+app.post('/comentarios/:id/deletar', checkAuth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [rows] = await pool.query('SELECT * FROM comentarios WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.redirect('/home');
+    }
+
+    const comentario = rows[0];
+    const isOwner = (comentario.usuario_id === req.session.usuario.id);
+    const isAdmin = (req.session.usuario.role === 'admin');
+
+    // Validação estrita no servidor (Enforcement de RBAC com HTTP 403)
+    if (!isOwner && !isAdmin) {
+      console.warn(`[RBAC] Usuário ID ${req.session.usuario.id} tentou apagar comentário de outro usuário sem ser admin.`);
+      return res.status(403).render('403', {
+        usuario: req.session.usuario,
+        mensagem: 'Acesso Negado (HTTP 403): Você não tem permissão para excluir o comentário de outro usuário. Apenas Administradores podem moderar comentários de terceiros.'
+      });
+    }
+
+    await pool.query('DELETE FROM comentarios WHERE id = ?', [id]);
+    res.redirect('/home');
+  } catch (error) {
+    console.error('Erro ao deletar comentário:', error);
+    res.redirect('/home');
+  }
+});
+
+// ==========================================
+// ROTAS ADMINISTRATIVAS (EXCLUSIVAS PARA ADMIN)
+// ==========================================
+
+// Painel de Gerenciamento de Usuários
+app.get('/admin/usuarios', requireAdmin, async (req, res) => {
+  try {
+    const response = await axios.get(`${AUTH_SERVICE_URL}/auth/users`);
+    res.render('admin-usuarios', {
+      usuario: req.session.usuario,
+      usuarios: response.data.users || [],
+      sucesso: req.query.sucesso || null,
+      erro: req.query.erro || null
+    });
+  } catch (error) {
+    console.error('Erro ao carregar painel de usuários:', error.message);
+    res.render('admin-usuarios', {
+      usuario: req.session.usuario,
+      usuarios: [],
+      sucesso: null,
+      erro: 'Não foi possível carregar os usuários do serviço de autenticação.'
+    });
+  }
+});
+
+// Alterar Papel de Usuário (Promover/Rebaixar)
+app.post('/admin/usuarios/:id/role', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { role } = req.body;
+
+  try {
+    const response = await axios.post(`${AUTH_SERVICE_URL}/auth/users/${id}/role`, {
+      role,
+      requesterRole: req.session.usuario.role
+    });
+
+    res.redirect(`/admin/usuarios?sucesso=${encodeURIComponent(response.data.message || 'Papel alterado com sucesso!')}`);
+  } catch (error) {
+    const msgErro = error.response?.data?.error || 'Erro ao alterar papel do usuário.';
+    res.redirect(`/admin/usuarios?erro=${encodeURIComponent(msgErro)}`);
   }
 });
 

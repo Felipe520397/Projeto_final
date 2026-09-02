@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel de Usuários - Administração</title>
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #141414; color: #fff; }
+    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 15px; margin-bottom: 25px; }
+    .header-user { display: flex; align-items: center; gap: 10px; }
+    .role-badge { font-size: 0.75em; padding: 3px 8px; border-radius: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+    .badge-admin { background: #e50914; color: white; }
+    .badge-user { background: #007bff; color: white; }
+    .btn-nav { color: #aaa; text-decoration: none; font-size: 0.9em; padding: 6px 12px; border: 1px solid #444; border-radius: 4px; transition: all 0.2s; }
+    .btn-nav:hover { color: #fff; border-color: #e50914; }
+    .card { background: #222; border-radius: 8px; padding: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+    h2 { margin-top: 0; color: #e50914; display: flex; align-items: center; gap: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #333; }
+    th { background: #1a1a1a; color: #bbb; font-weight: 600; font-size: 0.9em; text-transform: uppercase; }
+    tr:hover { background: #292929; }
+    .sucesso { background: rgba(70, 211, 105, 0.15); border: 1px solid #46d369; color: #46d369; padding: 12px; border-radius: 4px; font-size: 0.95em; margin-bottom: 20px; }
+    .erro { background: rgba(255, 77, 77, 0.15); border: 1px solid #ff4d4d; color: #ff8080; padding: 12px; border-radius: 4px; font-size: 0.95em; margin-bottom: 20px; }
+    .btn-action { padding: 6px 12px; border: none; border-radius: 4px; font-size: 0.85em; font-weight: bold; cursor: pointer; transition: opacity 0.2s; }
+    .btn-promote { background: #28a745; color: white; }
+    .btn-demote { background: #ffc107; color: #111; }
+    .btn-action:hover { opacity: 0.85; }
+    .info-box { background: rgba(0, 123, 255, 0.1); border-left: 4px solid #007bff; padding: 12px 15px; border-radius: 4px; font-size: 0.9em; color: #a0cfff; margin-bottom: 20px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎬 Catálogo de Filmes — Painel Administrativo</h1>
+    <div class="header-user">
+      <span>Olá, <strong><%= usuario.nome %></strong></span>
+      <span class="role-badge badge-admin">ADMIN</span>
+      | <a href="/home" class="btn-nav">← Voltar ao Catálogo</a>
+      | <a href="/logout" style="color: #ff4d4d; text-decoration: none;">Sair</a>
+    </div>
+  </header>
+
+  <div class="card">
+    <h2>🛡️ Gerenciamento de Usuários e Controle de Acesso (RBAC)</h2>
+    
+    <div class="info-box">
+      <strong>Controle de Acesso por Papel (RBAC):</strong> Administradores têm permissão exclusiva para gerenciar os papéis de acesso no sistema. Alterações de papel entram em vigor no próximo acesso do usuário.
+    </div>
+
+    <% if (locals.sucesso) { %>
+      <div class="sucesso">✅ <%= sucesso %></div>
+    <% } %>
+    <% if (locals.erro) { %>
+      <div class="erro">⚠️ <%= erro %></div>
+    <% } %>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Nome</th>
+          <th>E-mail</th>
+          <th>Papel Atual</th>
+          <th>Cadastrado em</th>
+          <th>Alterar Papel</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% usuarios.forEach(u => { %>
+          <tr>
+            <td>#<%= u.id %></td>
+            <td><strong><%= u.nome %></strong> <% if (u.id === usuario.id) { %><span style="color:#888; font-size:0.85em;">(Você)</span><% } %></td>
+            <td><%= u.email %></td>
+            <td>
+              <% if (u.role === 'admin') { %>
+                <span class="role-badge badge-admin">ADMIN</span>
+              <% } else { %>
+                <span class="role-badge badge-user">USUÁRIO</span>
+              <% } %>
+            </td>
+            <td><%= new Date(u.criado_em).toLocaleDateString('pt-BR') %></td>
+            <td>
+              <% if (u.id === usuario.id) { %>
+                <span style="color: #666; font-size: 0.85em;">Sua própria conta</span>
+              <% } else if (u.role === 'usuario') { %>
+                <form action="/admin/usuarios/<%= u.id %>/role" method="POST" style="display:inline;">
+                  <input type="hidden" name="role" value="admin">
+                  <button type="submit" class="btn-action btn-promote">⬆️ Promover a Admin</button>
+                </form>
+              <% } else { %>
+                <form action="/admin/usuarios/<%= u.id %>/role" method="POST" style="display:inline;">
+                  <input type="hidden" name="role" value="usuario">
+                  <button type="submit" class="btn-action btn-demote">⬇️ Rebaixar para Usuário</button>
+                </form>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>

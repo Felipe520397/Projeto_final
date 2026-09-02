@@ -5,12 +5,27 @@ require('dotenv').config();
 function createTransporter() {
   const host = process.env.SMTP_HOST || 'sandbox.smtp.mailtrap.io';
   const port = parseInt(process.env.SMTP_PORT || '2525', 10);
-  const user = process.env.SMTP_USER || '';
-  const pass = process.env.SMTP_PASS || '';
+  const user = (process.env.SMTP_USER || '').trim();
+  // Remove espaços caso o usuário tenha colado a senha do Google com espaços (ex: 'ryzt ydec oeay bswq')
+  const pass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
   const secure = process.env.SMTP_SECURE === 'true' || port === 465;
 
   if (!user || !pass) {
-    console.warn('[Mailer] ATENÇÃO: Credenciais SMTP não configuradas (SMTP_USER / SMTP_PASS). O envio de e-mails pode falhar.');
+    console.warn('[Mailer] ATENÇÃO: Credenciais SMTP não configuradas (SMTP_USER / SMTP_PASS).');
+  }
+
+  // Configuração específica para Gmail ou genérica para outros SMTPs
+  if (host.includes('gmail')) {
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user,
+        pass
+      },
+      tls: {
+        rejectUnauthorized: false
+      }
+    });
   }
 
   return nodemailer.createTransport({
@@ -20,6 +35,9 @@ function createTransporter() {
     auth: {
       user,
       pass
+    },
+    tls: {
+      rejectUnauthorized: false
     }
   });
 }
