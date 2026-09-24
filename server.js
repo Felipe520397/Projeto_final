@@ -18,8 +18,32 @@ app.use(session({
   saveUninitialized: false
 }));
 
-// URL do Microsserviço de Autenticação (Comunicação via Rede Interna Docker)
+// URLs dos Microsserviços Internos (Comunicação via Rede Interna Docker)
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://auth-service:3001';
+const LOG_SERVICE_URL = process.env.LOG_SERVICE_URL || 'http://log-service:3002';
+
+/**
+ * Função Auxiliar: Dispara logs de auditoria para o microsserviço log-service
+ */
+async function sendAuditLog(req, acao, detalhes = {}) {
+  try {
+    const user = req.session?.usuario || {};
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+
+    await axios.post(`${LOG_SERVICE_URL}/logs`, {
+      usuario_id: user.id || 'anonimo',
+      usuario_nome: user.nome || 'Anônimo',
+      usuario_email: user.email || '',
+      acao,
+      detalhes,
+      ip: clientIp,
+      timestamp: new Date().toISOString(),
+      servico_origem: 'catalogo'
+    }, { timeout: 2000 });
+  } catch (err) {
+    console.warn('[Audit Log Warning] Falha ao enviar evento para log-service:', err.message);
+  }
+}
 
 // Pool de conexão para Favoritos e Comentários do Catálogo
 const pool = mysql.createPool({
@@ -98,6 +122,12 @@ function requireAdmin(req, res, next) {
   
   // Validação estrita no servidor (Enforcement de RBAC)
   if (req.session.usuario.role !== 'admin') {
+    // Registra tentativa negada no log de auditoria
+    sendAuditLog(req, 'ACESSO_NEGADO_403_ADMIN_ROUTE', {
+      rota_tentada: req.originalUrl,
+      papel_usuario: req.session.usuario.role
+    });
+
     return res.status(403).render('403', {
       usuario: req.session.usuario,
       mensagem: 'Acesso Negado (HTTP 403): Esta ação ou página é restrita a Administradores do sistema.'
@@ -322,6 +352,10 @@ app.post('/favoritar', checkAuth, async (req, res) => {
       'INSERT IGNORE INTO favoritos (usuario_id, filme_id, titulo, poster_path) VALUES (?, ?, ?, ?)',
       [req.session.usuario.id, filme_id, titulo, poster_path]
     );
+
+    // Log de auditoria
+    sendAuditLog(req, 'FAVORITAR_FILME', { filme_id, titulo });
+
     res.redirect('/home');
   } catch (error) {
     console.error('Erro ao favoritar:', error);
@@ -337,6 +371,10 @@ app.post('/desfavoritar', checkAuth, async (req, res) => {
       'DELETE FROM favoritos WHERE usuario_id = ? AND filme_id = ?',
       [req.session.usuario.id, filme_id]
     );
+
+    // Log de auditoria
+    sendAuditLog(req, 'DESFAVORITAR_FILME', { filme_id });
+
     res.redirect('/home');
   } catch (error) {
     console.error('Erro ao desfavoritar:', error);
@@ -353,6 +391,12 @@ app.post('/comentar', checkAuth, async (req, res) => {
         'INSERT INTO comentarios (usuario_id, usuario_nome, filme_id, texto) VALUES (?, ?, ?, ?)',
         [req.session.usuario.id, req.session.usuario.nome, filme_id, texto.trim()]
       );
+
+      // Log de auditoria
+      sendAuditLog(req, 'CRIAR_COMENTARIO', {
+        filme_id,
+        texto_resumo: texto.trim().substring(0, 40)
+      });
     }
     res.redirect('/home');
   } catch (error) {
@@ -377,6 +421,14 @@ app.post('/comentarios/:id/deletar', checkAuth, async (req, res) => {
     // Validação estrita no servidor (Enforcement de RBAC com HTTP 403)
     if (!isOwner && !isAdmin) {
       console.warn(`[RBAC] Usuário ID ${req.session.usuario.id} tentou apagar comentário de outro usuário sem ser admin.`);
+      
+      // Log de auditoria de segurança (tentativa bloqueada 403)
+      sendAuditLog(req, 'ACESSO_NEGADO_403_MODERACAO', {
+        comentario_id: id,
+        autor_comentario_id: comentario.usuario_id,
+        autor_comentario_nome: comentario.usuario_nome
+      });
+
       return res.status(403).render('403', {
         usuario: req.session.usuario,
         mensagem: 'Acesso Negado (HTTP 403): Você não tem permissão para excluir o comentário de outro usuário. Apenas Administradores podem moderar comentários de terceiros.'
@@ -384,7 +436,23 @@ app.post('/comentarios/:id/deletar', checkAuth, async (req, res) => {
     }
 
     await pool.query('DELETE FROM comentarios WHERE id = ?', [id]);
-    res.redirect('/home');
+
+    // Log de auditoria (Diferenciação entre exclusão própria e moderação de admin)
+    if (isAdmin && !isOwner) {
+      sendAuditLog(req, 'MODERAR_COMENTARIO_ADMIN', {
+        comentario_id: id,
+        autor_original: comentario.usuario_nome,
+        filme_id: comentario.filme_id,
+        texto_resumo: comentario.texto.substring(0, 30)
+      });
+    } else {
+      sendAuditLog(req, 'EXCLUIR_COMENTARIO_PROPRIO', {
+        comentario_id: id,
+        filme_id: comentario.filme_id
+      });
+    }
+
+    res.redirect(req.headers.referer || '/home');
   } catch (error) {
     console.error('Erro ao deletar comentário:', error);
     res.redirect('/home');
@@ -452,8 +520,36 @@ app.post('/admin/usuarios/:id/role', requireAdmin, async (req, res) => {
   }
 });
 
+// Painel de Logs de Auditoria (Redis Streams)
+app.get('/admin/logs', requireAdmin, async (req, res) => {
+  try {
+    const response = await axios.get(`${LOG_SERVICE_URL}/logs`, {
+      params: {
+        limit: 100,
+        acao: req.query.acao || undefined
+      }
+    });
+
+    res.render('admin-logs', {
+      usuario: req.session.usuario,
+      logs: response.data.logs || [],
+      filtroAcao: req.query.acao || ''
+    });
+  } catch (error) {
+    console.error('Erro ao consultar logs do log-service:', error.message);
+    res.render('admin-logs', {
+      usuario: req.session.usuario,
+      logs: [],
+      filtroAcao: req.query.acao || ''
+    });
+  }
+});
+
 // LOGOUT
 app.get('/logout', (req, res) => {
+  if (req.session.usuario) {
+    sendAuditLog(req, 'LOGOUT', { email: req.session.usuario.email });
+  }
   req.session.destroy();
   res.redirect('/login');
 });
@@ -462,4 +558,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`>>> [CATÁLOGO] SERVIDOR RODANDO EM http://localhost:${PORT} <<<`);
   console.log(`>>> [CATÁLOGO] Microsserviço de Auth conectado em: ${AUTH_SERVICE_URL} <<<`);
+  console.log(`>>> [CATÁLOGO] Microsserviço de Logs conectado em: ${LOG_SERVICE_URL} <<<`);
 });

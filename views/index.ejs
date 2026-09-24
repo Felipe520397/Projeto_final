@@ -42,7 +42,8 @@
       <span>Olá, <strong><%= usuario.nome %></strong></span>
       <% if (usuario.role === 'admin') { %>
         <span class="role-badge badge-admin">ADMIN</span>
-        <a href="/admin/usuarios" class="btn-admin-nav">🛡️ Painel Admin</a>
+        <a href="/admin/usuarios" class="btn-admin-nav">🛡️ Usuários</a>
+        <a href="/admin/logs" class="btn-admin-nav" style="border-color: #007bff;">📜 Logs</a>
       <% } else { %>
         <span class="role-badge badge-user">USUÁRIO</span>
       <% } %>

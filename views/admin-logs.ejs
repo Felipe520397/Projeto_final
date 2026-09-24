@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logs de Auditoria - Administração</title>
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #141414; color: #fff; }
+    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 15px; margin-bottom: 25px; }
+    .header-user { display: flex; align-items: center; gap: 10px; }
+    .role-badge { font-size: 0.75em; padding: 3px 8px; border-radius: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
+    .badge-admin { background: #e50914; color: white; }
+    .badge-user { background: #007bff; color: white; }
+    .btn-nav { color: #aaa; text-decoration: none; font-size: 0.9em; padding: 6px 12px; border: 1px solid #444; border-radius: 4px; transition: all 0.2s; }
+    .btn-nav:hover { color: #fff; border-color: #e50914; }
+    .btn-nav.active { background: #e50914; color: white; border-color: #e50914; }
+    .card { background: #222; border-radius: 8px; padding: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+    h2 { margin-top: 0; color: #e50914; display: flex; align-items: center; gap: 10px; font-size: 1.3em; border-bottom: 1px solid #333; padding-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.9em; }
+    th, td { padding: 12px 10px; text-align: left; border-bottom: 1px solid #333; }
+    th { background: #1a1a1a; color: #bbb; font-weight: 600; font-size: 0.85em; text-transform: uppercase; }
+    tr:hover { background: #292929; }
+    
+    .badge-action { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; font-family: monospace; }
+    .badge-success { background: rgba(40, 167, 69, 0.2); border: 1px solid #28a745; color: #46d369; }
+    .badge-danger { background: rgba(229, 9, 20, 0.25); border: 1px solid #e50914; color: #ff8080; }
+    .badge-warning { background: rgba(255, 193, 7, 0.2); border: 1px solid #ffc107; color: #ffd659; }
+    .badge-info { background: rgba(0, 123, 255, 0.2); border: 1px solid #007bff; color: #70b4ff; }
+    .badge-secondary { background: rgba(108, 117, 125, 0.2); border: 1px solid #6c757d; color: #bbb; }
+
+    .service-tag { font-size: 0.75em; background: #333; color: #aaa; padding: 2px 6px; border-radius: 3px; }
+    .info-box { background: rgba(0, 123, 255, 0.1); border-left: 4px solid #007bff; padding: 12px 15px; border-radius: 4px; font-size: 0.9em; color: #a0cfff; margin-bottom: 20px; line-height: 1.4; }
+    
+    .stat-bar { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+    .stat-card { background: #1a1a1a; border-radius: 6px; padding: 12px 18px; flex: 1; min-width: 150px; border-left: 4px solid #e50914; }
+    .stat-num { font-size: 1.6em; font-weight: bold; color: #fff; }
+    .stat-label { font-size: 0.8em; color: #888; text-transform: uppercase; }
+
+    .filter-bar { display: flex; gap: 10px; margin-bottom: 15px; align-items: center; flex-wrap: wrap; }
+    .filter-btn { background: #333; border: 1px solid #555; color: #ccc; padding: 6px 12px; border-radius: 4px; font-size: 0.85em; cursor: pointer; text-decoration: none; }
+    .filter-btn:hover, .filter-btn.active { background: #e50914; color: white; border-color: #e50914; }
+    
+    .detalhes-code { background: #111; padding: 4px 8px; border-radius: 4px; font-family: 'Courier New', Courier, monospace; font-size: 0.85em; color: #00ffaa; max-width: 280px; word-break: break-all; display: inline-block; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎬 Catálogo de Filmes — Central de Auditoria</h1>
+    <div class="header-user">
+      <span>Olá, <strong><%= usuario.nome %></strong></span>
+      <span class="role-badge badge-admin">ADMIN</span>
+      | <a href="/home" class="btn-nav">← Voltar ao Catálogo</a>
+      | <a href="/admin/usuarios" class="btn-nav">👥 Usuários & Moderação</a>
+      | <a href="/admin/logs" class="btn-nav active">📜 Logs de Auditoria</a>
+      | <a href="/logout" style="color: #ff4d4d; text-decoration: none; font-weight: bold;">Sair</a>
+    </div>
+  </header>
+
+  <!-- Estatísticas de Auditoria -->
+  <div class="stat-bar">
+    <div class="stat-card" style="border-left-color: #007bff;">
+      <div class="stat-num"><%= logs.length %></div>
+      <div class="stat-label">📜 Total de Eventos</div>
+    </div>
+    <div class="stat-card" style="border-left-color: #e50914;">
+      <div class="stat-num"><%= logs.filter(l => l.acao && l.acao.includes('403')).length %></div>
+      <div class="stat-label">🚫 Acessos Bloqueados (403)</div>
+    </div>
+    <div class="stat-card" style="border-left-color: #28a745;">
+      <div class="stat-num"><%= logs.filter(l => l.acao && l.acao.includes('LOGIN')).length %></div>
+      <div class="stat-label">🔑 Eventos de Login</div>
+    </div>
+    <div class="stat-card" style="border-left-color: #ffc107;">
+      <div class="stat-num"><%= logs.filter(l => l.acao && (l.acao.includes('MODERAR') || l.acao.includes('COMENTARIO'))).length %></div>
+      <div class="stat-label">💬 Comentários / Moderações</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>📜 Registro de Auditoria em Tempo Real (Redis Streams)</h2>
+
+    <div class="info-box">
+      <strong>Logs e Auditoria Desacoplados:</strong> Todos os eventos críticos do sistema são capturados e armazenados no <code>log-service</code> utilizando <strong>Redis Streams</strong> (<code>audit_stream</code>). As ações mais recentes aparecem no topo.
+    </div>
+
+    <!-- Filtros Rápidos -->
+    <div class="filter-bar">
+      <span>Filtros rápidos:</span>
+      <a href="/admin/logs" class="filter-btn <%= !filtroAcao ? 'active' : '' %>">Todos os Logs</a>
+      <a href="/admin/logs?acao=403" class="filter-btn <%= filtroAcao === '403' ? 'active' : '' %>">🚫 Acessos Negados (403)</a>
+      <a href="/admin/logs?acao=LOGIN" class="filter-btn <%= filtroAcao === 'LOGIN' ? 'active' : '' %>">🔑 Logins</a>
+      <a href="/admin/logs?acao=COMENTARIO" class="filter-btn <%= filtroAcao === 'COMENTARIO' ? 'active' : '' %>">💬 Comentários</a>
+      <a href="/admin/logs?acao=FAVORITAR" class="filter-btn <%= filtroAcao === 'FAVORITAR' ? 'active' : '' %>">⭐ Favoritos</a>
+      <a href="/admin/logs?acao=ROLE" class="filter-btn <%= filtroAcao === 'ROLE' ? 'active' : '' %>">🛡️ Alterações de Role</a>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Data / Hora</th>
+          <th>Usuário</th>
+          <th>Ação</th>
+          <th>Detalhes</th>
+          <th>IP de Origem</th>
+          <th>Serviço</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% if (logs.length === 0) { %>
+          <tr>
+            <td colspan="6" style="text-align: center; color: #888; padding: 30px;">
+              Nenhum registro de auditoria encontrado para os critérios selecionados.
+            </td>
+          </tr>
+        <% } %>
+
+        <% logs.forEach(log => { %>
+          <tr>
+            <td style="white-space: nowrap; color: #ccc;">
+              <%= new Date(log.timestamp).toLocaleString('pt-BR') %>
+            </td>
+
+            <td>
+              <strong><%= log.usuario_nome %></strong>
+              <% if (log.usuario_id && log.usuario_id !== 'anonimo') { %>
+                <span style="color: #888; font-size: 0.85em;">(#<%= log.usuario_id %>)</span>
+              <% } %>
+            </td>
+
+            <td>
+              <% if (log.acao.includes('403') || log.acao.includes('FALHA') || log.acao.includes('NEGADO')) { %>
+                <span class="badge-action badge-danger"><%= log.acao %></span>
+              <% } else if (log.acao.includes('SUCESSO') || log.acao.includes('CADASTRO')) { %>
+                <span class="badge-action badge-success"><%= log.acao %></span>
+              <% } else if (log.acao.includes('MODERAR') || log.acao.includes('EXCLUIR') || log.acao.includes('ROLE')) { %>
+                <span class="badge-action badge-warning"><%= log.acao %></span>
+              <% } else if (log.acao.includes('FAVORITAR') || log.acao.includes('COMENTARIO')) { %>
+                <span class="badge-action badge-info"><%= log.acao %></span>
+              <% } else { %>
+                <span class="badge-action badge-secondary"><%= log.acao %></span>
+              <% } %>
+            </td>
+
+            <td>
+              <% if (typeof log.detalhes === 'object') { %>
+                <span class="detalhes-code"><%= JSON.stringify(log.detalhes) %></span>
+              <% } else if (log.detalhes) { %>
+                <span class="detalhes-code"><%= log.detalhes %></span>
+              <% } else { %>
+                <span style="color: #666;">-</span>
+              <% } %>
+            </td>
+
+            <td style="color: #aaa; font-family: monospace; font-size: 0.85em;">
+              <%= log.ip %>
+            </td>
+
+            <td>
+              <span class="service-tag"><%= log.servico_origem || 'app' %></span>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>

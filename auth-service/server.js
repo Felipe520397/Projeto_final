@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const cors = require('cors');
+const axios = require('axios');
 require('dotenv').config();
 
 const { pool, initDatabase } = require('./db');
@@ -11,6 +12,28 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+const LOG_SERVICE_URL = process.env.LOG_SERVICE_URL || 'http://log-service:3002';
+
+/**
+ * Envia evento de auditoria para o microsserviço log-service
+ */
+async function logAuditEvent({ usuario_id, usuario_nome, usuario_email, acao, detalhes, ip }) {
+  try {
+    await axios.post(`${LOG_SERVICE_URL}/logs`, {
+      usuario_id,
+      usuario_nome,
+      usuario_email,
+      acao,
+      detalhes,
+      ip,
+      timestamp: new Date().toISOString(),
+      servico_origem: 'auth-service'
+    }, { timeout: 2000 });
+  } catch (err) {
+    console.warn('[Auth-Service Log Warning] Não foi possível registrar evento no log-service:', err.message);
+  }
+}
 
 // Inicializa banco de dados (tabelas e migrações)
 initDatabase();
@@ -27,6 +50,7 @@ app.get('/health', (req, res) => {
  */
 app.post('/auth/register', async (req, res) => {
   const { nome, email, senha, role } = req.body;
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
 
   if (!nome || !email || !senha) {
     return res.status(400).json({ success: false, error: 'Nome, e-mail e senha são obrigatórios.' });
@@ -35,6 +59,14 @@ app.post('/auth/register', async (req, res) => {
   try {
     const [existentes] = await pool.query('SELECT id FROM usuarios WHERE email = ?', [email]);
     if (existentes.length > 0) {
+      logAuditEvent({
+        usuario_id: null,
+        usuario_nome: nome,
+        usuario_email: email,
+        acao: 'CADASTRO_FALHA_EMAIL_DUPLICADO',
+        detalhes: { motivo: 'email_ja_cadastrado' },
+        ip: clientIp
+      });
       return res.status(400).json({ success: false, error: 'Este e-mail já está cadastrado.' });
     }
 
@@ -52,6 +84,16 @@ app.post('/auth/register', async (req, res) => {
       email,
       role: roleFinal
     };
+
+    // Log de auditoria
+    logAuditEvent({
+      usuario_id: result.insertId,
+      usuario_nome: nome,
+      usuario_email: email,
+      acao: 'CADASTRO_USUARIO',
+      detalhes: { role: roleFinal },
+      ip: clientIp
+    });
 
     return res.status(201).json({
       success: true,
@@ -71,6 +113,7 @@ app.post('/auth/register', async (req, res) => {
  */
 app.post('/auth/login', async (req, res) => {
   const { email, senha } = req.body;
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
 
   if (!email || !senha) {
     return res.status(400).json({ success: false, error: 'E-mail e senha são obrigatórios.' });
@@ -79,6 +122,14 @@ app.post('/auth/login', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM usuarios WHERE email = ?', [email]);
     if (rows.length === 0) {
+      logAuditEvent({
+        usuario_id: null,
+        usuario_nome: 'Anônimo',
+        usuario_email: email,
+        acao: 'LOGIN_FALHA_USUARIO_NAO_ENCONTRADO',
+        detalhes: { motivo: 'usuario_nao_encontrado' },
+        ip: clientIp
+      });
       return res.status(401).json({ success: false, error: 'Usuário não encontrado.' });
     }
 
@@ -93,6 +144,14 @@ app.post('/auth/login', async (req, res) => {
     }
 
     if (!senhaValida) {
+      logAuditEvent({
+        usuario_id: usuario.id,
+        usuario_nome: usuario.nome,
+        usuario_email: usuario.email,
+        acao: 'LOGIN_FALHA_SENHA_INCORRETA',
+        detalhes: { motivo: 'senha_incorreta' },
+        ip: clientIp
+      });
       return res.status(401).json({ success: false, error: 'Senha incorreta.' });
     }
 
@@ -102,6 +161,16 @@ app.post('/auth/login', async (req, res) => {
       email: usuario.email,
       role: usuario.role || 'usuario'
     };
+
+    // Log de auditoria
+    logAuditEvent({
+      usuario_id: usuario.id,
+      usuario_nome: usuario.nome,
+      usuario_email: usuario.email,
+      acao: 'LOGIN_SUCESSO',
+      detalhes: { role: userRetorno.role },
+      ip: clientIp
+    });
 
     return res.json({
       success: true,
@@ -160,9 +229,18 @@ app.get('/auth/users', async (req, res) => {
 app.post('/auth/users/:id/role', async (req, res) => {
   const { id } = req.params;
   const { role, requesterRole } = req.body;
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
 
   // Validação no servidor: apenas admin pode alterar papéis
   if (requesterRole !== 'admin') {
+    logAuditEvent({
+      usuario_id: null,
+      usuario_nome: 'Tentativa Não Autorizada',
+      acao: 'ACESSO_NEGADO_403_ALTERAR_ROLE',
+      detalhes: { target_usuario_id: id, role_solicitada: role },
+      ip: clientIp
+    });
+
     return res.status(403).json({
       success: false,
       error: 'Acesso negado (HTTP 403): apenas administradores têm permissão para alterar papéis de usuários.'
@@ -179,6 +257,14 @@ app.post('/auth/users/:id/role', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Usuário não encontrado.' });
     }
 
+    logAuditEvent({
+      usuario_id: id,
+      usuario_nome: 'Administrador',
+      acao: 'ALTERAR_ROLE_SUCESSO',
+      detalhes: { target_usuario_id: id, novo_role: role },
+      ip: clientIp
+    });
+
     console.log(`[Auth-Service] Papel do usuário ID ${id} alterado para "${role}".`);
     return res.json({ success: true, message: `Papel do usuário atualizado para "${role}" com sucesso!` });
   } catch (error) {
@@ -194,6 +280,7 @@ app.post('/auth/users/:id/role', async (req, res) => {
  */
 app.post('/auth/forgot-password', async (req, res) => {
   const { email, appUrl } = req.body;
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
 
   if (!email) {
     return res.status(400).json({ success: false, error: 'E-mail é obrigatório.' });
@@ -202,7 +289,6 @@ app.post('/auth/forgot-password', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT id, nome, email FROM usuarios WHERE email = ?', [email]);
     if (rows.length === 0) {
-      // Retorna sucesso para evitar enumeração de e-mails, mas avisa no log
       console.log(`[Auth-Service] Solicitação de recuperação para e-mail não cadastrado: ${email}`);
       return res.json({
         success: true,
@@ -218,8 +304,6 @@ app.post('/auth/forgot-password', async (req, res) => {
     // Validade de exatamente 30 minutos
     const agora = new Date();
     const expiraEm = new Date(agora.getTime() + 30 * 60 * 1000);
-
-    // Formata datas para MySQL DATETIME (YYYY-MM-DD HH:MM:SS)
     const expiraEmSql = expiraEm.toISOString().slice(0, 19).replace('T', ' ');
 
     await pool.query(
@@ -227,13 +311,21 @@ app.post('/auth/forgot-password', async (req, res) => {
       [token, usuario.id, expiraEmSql]
     );
 
-    // Monta a URL pública de redefinição no catálogo
     const baseUrl = appUrl || process.env.APP_URL || 'http://localhost:8204';
     const resetLink = `${baseUrl.replace(/\/$/, '')}/redefinir-senha?token=${token}`;
 
+    logAuditEvent({
+      usuario_id: usuario.id,
+      usuario_nome: usuario.nome,
+      usuario_email: usuario.email,
+      acao: 'SOLICITAR_RECUPERACAO_SENHA',
+      detalhes: { expira_em: expiraEmSql },
+      ip: clientIp
+    });
+
     console.log(`[Auth-Service] Token gerado para ${usuario.email}: ${token} (Expira em: ${expiraEmSql})`);
 
-    // Envio do e-mail via Mailtrap / SMTP
+    // Envio do e-mail via SMTP
     try {
       await sendPasswordResetEmail(usuario.email, usuario.nome, resetLink);
     } catch (mailErr) {
@@ -313,6 +405,7 @@ app.get('/auth/validate-token/:token', async (req, res) => {
  */
 app.post('/auth/reset-password', async (req, res) => {
   const { token, novaSenha } = req.body;
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
 
   if (!token || !novaSenha) {
     return res.status(400).json({ success: false, error: 'Token e nova senha são obrigatórios.' });
@@ -357,6 +450,14 @@ app.post('/auth/reset-password', async (req, res) => {
     // 4. Marca o token como usado para evitar reutilização
     await pool.query('UPDATE reset_tokens SET usado = 1 WHERE id = ?', [tokenData.id]);
 
+    logAuditEvent({
+      usuario_id: tokenData.usuario_id,
+      usuario_nome: 'Usuário',
+      acao: 'REDEFINIR_SENHA_SUCESSO',
+      detalhes: { token: token.substring(0, 8) + '...' },
+      ip: clientIp
+    });
+
     console.log(`[Auth-Service] Senha do usuário ID ${tokenData.usuario_id} redefinida com sucesso via token ${token}.`);
 
     return res.json({
@@ -373,4 +474,3 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`>>> [AUTH-SERVICE] RODANDO INTERNAMENTE NA PORTA ${PORT} <<<`);
 });
-

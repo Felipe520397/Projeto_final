@@ -1,0 +1,15 @@
+{
+  "name": "log-service",
+  "version": "1.0.0",
+  "description": "Microsserviço de Logs e Auditoria com Redis Streams - ISW055",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "ioredis": "^5.4.1"
+  }
+}

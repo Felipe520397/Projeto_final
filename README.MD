@@ -1,163 +1,189 @@
-# Catálogo de Filmes — Tom Hanks (Microsserviço Desacoplado & RBAC)
+# Catálogo de Filmes — Tom Hanks (Microsserviços, RBAC & Logs de Auditoria com Redis)
 
 Aplicação desenvolvida para a disciplina **ISW055 - Introdução à Computação em Nuvem**, ministrada pelo professor **[@siriani](https://github.com/siriani)** ([github.com/siriani](https://github.com/siriani)).
 
 ---
 
-## 📌 Evolução do Projeto
+## 📌 Linha do Tempo e Evolução do Projeto
 
-- **Atividade 2**: Monólito em 1 container (Catálogo, autenticação, banco e regras no mesmo processo).
-- **Atividade 3**: Desacoplamento em 2 containers (`web` e `auth-service`) com comunicação em rede interna Docker, roles e recuperação de senha com tokens de 30 minutos via SMTP (Mailtrap/Brevo/Gmail).
-- **Atividade 4 (Atual)**: **Controle de Acesso Baseado em Papel (*Role-Based Access Control* - RBAC)** com enforcement estrito no backend (HTTP 403).
-
----
-
-## 🛡️ Atividade 4 — Controle de Acesso por Papel (RBAC de Verdade)
-
-### 1. Matriz de Permissões por Papel (Requisito 1)
-
-O sistema possui dois papéis bem definidos (`usuario` e `admin`). As permissões atribuídas a cada papel são:
-
-| Recurso | Ação | Permissão Técnica | Papel `usuario` | Papel `admin` |
-| :--- | :--- | :--- | :---: | :---: |
-| **Catálogo** | Visualizar lista e detalhes de filmes | `catalogo:visualizar` | ✅ Permitido | ✅ Permitido |
-| **Favoritos** | Adicionar ou remover filmes dos favoritos | `favoritos:gerenciar` | ✅ Permitido | ✅ Permitido |
-| **Comentários** | Criar novo comentário em um filme | `comentarios:criar` | ✅ Permitido | ✅ Permitido |
-| **Comentários** | Excluir o **próprio** comentário | `comentarios:apagar:proprio` | ✅ Permitido | ✅ Permitido |
-| **Comentários** | Excluir comentário de **qualquer usuário** (Moderação) | `comentarios:apagar:qualquer` | ❌ **Negado (403)** | ✅ Permitido |
-| **Usuários** | Listar todos os usuários do sistema | `usuarios:listar` | ❌ **Negado (403)** | ✅ Permitido |
-| **Usuários** | Alterar papel (*role*) de usuários (Promover/Rebaixar) | `usuarios:alterar-role` | ❌ **Negado (403)** | ✅ Permitido |
-| **Senha** | Redefinir sua própria senha por e-mail | `senha:redefinir` | ✅ Permitido | ✅ Permitido |
+- **Atividade 2 (Monólito)**: 1 container único com catálogo, login, banco e regras no mesmo deploy.
+- **Atividade 3 (Serviços Desacoplados)**: Separação em 2 containers (`web` e `auth-service`) com rede interna Docker, roles e recuperação de senha por e-mail com tokens de 30 min via SMTP.
+- **Atividade 4 (Autorização RBAC)**: Controle de acesso baseado em papéis com validação estrita no servidor (HTTP 403) e moderação de comentários por administradores.
+- **Atividade 5 (Logs e Auditoria com Redis Streams - Atual)**: Centralização de logs de auditoria em um novo microsserviço (`log-service`) com persistência em **Redis Streams** (`XADD` e `XREVRANGE`), rastreando quem fez o quê, quando e de qual IP.
 
 ---
 
-### 2. Ações Exclusivas de Administrador (Requisito 2)
-
-Foram implementadas duas ações exclusivas para administradores:
-1. **Moderação Global de Comentários (`POST /comentarios/:id/deletar`)**:
-   - Um usuário comum só pode apagar comentários criados por ele mesmo (`usuario_id === req.session.usuario.id`).
-   - O administrador tem o poder de moderação para apagar comentários de qualquer usuário.
-2. **Painel de Gestão de Usuários e Roles (`/admin/usuarios` e `POST /admin/usuarios/:id/role`)**:
-   - Acesso exclusivo para administradores visualizarem todos os usuários e promoverem/rebaixarem contas entre `usuario` e `admin`.
-
----
-
-### 3. Enforcement Estrito no Backend (Requisito 3)
-
-A segurança **não depende apenas de esconder botões na interface**. A validação é sempre executada no servidor:
-
-```javascript
-// Exemplo no Catálogo (server.js):
-const isOwner = (comentario.usuario_id === req.session.usuario.id);
-const isAdmin = (req.session.usuario.role === 'admin');
-
-if (!isOwner && !isAdmin) {
-  return res.status(403).render('403', {
-    usuario: req.session.usuario,
-    mensagem: 'Acesso Negado (HTTP 403): Você não tem permissão para excluir o comentário de outro usuário.'
-  });
-}
-```
-
-Se um usuário com papel `usuario` tentar forçar a chamada de uma rota administrativa via Postman, curl ou DevTools:
-- Rota Web: Renderiza a tela estilizada **`403 Forbidden`** com código HTTP 403.
-- Rota API no Auth-Service: Retorna JSON `{ success: false, error: 'Acesso negado (HTTP 403)...' }` com status 403.
-
----
-
-### 4. Análise Arquitetural: Padrão A vs Padrão B (Requisito 5)
-
-#### Qual padrão o projeto utiliza hoje?
-O projeto utiliza o **PADRÃO A (Enforcement Centralizado)**.
-- O catálogo mantém a sessão do usuário e valida o papel em tempo de execução junto aos dados do microsserviço de autenticação e banco de dados.
-- **Vantagem**: Revogação e atualização de permissões **imediatas**. Se um administrador rebaixar um usuário de `admin` para `usuario` no painel, a perda de permissão passa a valer instantaneamente na próxima requisição do usuário.
-- **Trade-off**: Requer verificação de estado ou comunicação entre serviços.
-
-#### O que mudaria se o projeto migrasse para o PADRÃO B (Claims no Token JWT)?
-- No momento do login, o `auth-service` geraria um token assinado (JWT) contendo as informações do usuário e suas permissões no payload (ex: `{ id, nome, email, role: 'admin' }`).
-- O catálogo não precisaria de sessões no servidor nem de chamadas extras ao `auth-service` para verificar o papel: bastaria validar a assinatura criptográfica do JWT usando uma chave secreta compartilhada (`JWT_SECRET`).
-- **Vantagem**: Redução de chamadas de rede e maior velocidade de resposta.
-- **Trade-off**: Se o papel de um usuário for alterado no banco de dados, o usuário continuará com as permissões antigas até que o token JWT expire e seja renovado.
-
----
-
-## 🏗️ Arquitetura do Sistema
+## 🏗️ Arquitetura do Sistema (4 Containers)
 
 ```
 +-------------------------------------------------------------------------+
 |                              NAVEGADOR                                  |
-|                            (Usuário Final)                              |
+|                   (Usuário Comum ou Administrador)                      |
 +------------------------------------+------------------------------------+
                                      |
                        [HTTP / HTTPS]| Porta Pública (ex: :8204)
                                      v
 +------------------------------------+------------------------------------+
 | CONTAINER 1: CATALOG-SERVICE (Ponto de Entrada Público)                 |
-| - SSR EJS: Login, Cadastro, Esqueci Senha, Home, Painel Admin (RBAC)    |
-| - Consome API do TMDB no backend                                        |
-| - Gerencia Sessões, Favoritos e Comentários (com Moderação)             |
-+------------------------------------+------------------------------------+
-                                     |
-                                     | Rede Interna Docker (bridge: app-network)
-                                     | (http://auth-service:3001)
-                                     v
-+------------------------------------+------------------------------------+
-| CONTAINER 2: AUTH-SERVICE (Sem Porta Pública Exposta)                  |
-| - Gerencia Usuários e Roles (usuario / admin)                           |
-| - Gerencia Tokens de Recuperação de Senha (expiração em 30 min)        |
-| - Envio de e-mails via SMTP (Mailtrap / Brevo / Gmail)                  |
-+------------------+------------------------------------+-----------------+
-                   |                                    |
-                   v                                    v
-+------------------+---------------+   +----------------+-----------------+
-|          BANCO DE DADOS          |   |          SMTP EXTERNO            |
-|             MariaDB              |   |  Mailtrap / Brevo / Gmail SMTP   |
-| - usuarios (com role)            |   +----------------------------------+
-| - reset_tokens                   |
-| - favoritos & comentarios        |
-+----------------------------------+
+| - SSR EJS: Catálogo, Favoritos, Comentários, Painéis Admin              |
+| - Dispara logs de eventos para o log-service via HTTP interno          |
+| - Rota /admin/logs protegida por RBAC (requireAdmin)                    |
++-------------------+--------------------------------+--------------------+
+                    |                                |
+   [HTTP Interno]   |                                | [HTTP Interno]
+ (http://auth:3001) |                                | (http://log-service:3002)
+                    v                                v
++-------------------+---------------+   +------------+--------------------+
+| CONTAINER 2: AUTH-SERVICE         |   | CONTAINER 3: LOG-SERVICE           |
+| - Login, Cadastro, Roles, Senha   |   | - Endpoints: POST /logs, GET /logs |
+| - Dispara logs de eventos         |-->| - Comunica com Redis via Streams   |
++-------------------+---------------+   +------------+--------------------+
+                    |                                |
+                    v                                v
++-------------------+---------------+   +------------+--------------------+
+|     BANCO RELACIONAL: MariaDB     |   |    BANCO DE EVENTOS: REDIS         |
+| - usuarios, reset_tokens, etc.    |   | - Redis Streams (audit_stream)     |
++-----------------------------------+   +---------------------------------+
 ```
 
 ---
 
-## ⚙️ Variáveis de Ambiente (`.env`)
+## 📜 Logs e Auditoria — Por que Redis Streams?
 
-```env
-# Porta no Host
-PORT=8204
-PORT_HOST=8204
-SESSION_SECRET=minha_chave_secreta_segura
-TMDB_API_KEY=sua_chave_do_tmdb
+### Por que um microsserviço próprio?
+Misturar logs de auditoria no banco relacional da aplicação (MariaDB) acopla responsabilidades que mudam por motivos distintos. Logs de auditoria possuem um padrão de uso com **altíssimo volume de escrita, baixa necessidade de transações ACID complexas e leitura quase exclusiva para consulta/auditoria**. Desacoplar em um serviço próprio (`log-service`) garante que a escrita de logs não onere as tabelas relacionais do sistema.
 
-# MariaDB
-DB_HOST=35.226.64.52
-DB_PORT=3306
-DB_USER=seu_usuario
-DB_PASSWORD=sua_senha
-DB_NAME=seu_banco
+### Por que Redis Streams?
+O Redis é extremamente rápido para escrita em memória com persistência AOF (`--appendonly yes`). O recurso **Redis Streams** foi desenhado especificamente para logs e fluxos de eventos ordenados no tempo:
+- **`XADD audit_stream MAXLEN ~ 5000 * ...`**: Grava os eventos no stream gerando automaticamente IDs baseados em timestamp milissegundo, mantendo uma fila limitada em memória.
+- **`XREVRANGE audit_stream + - COUNT <limite>`**: Permite ao painel administrativo consultar instantaneamente os eventos mais recentes em ordem cronológica decrescente.
 
-# Configurações SMTP
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=seuemail@gmail.com
-SMTP_PASS=sua_senha_de_app
-SMTP_FROM="Catálogo Tom Hanks <seuemail@gmail.com>"
+---
 
-# URL Pública
-APP_URL=http://35.226.64.52:8204
+## 📋 Eventos Auditados no Sistema
+
+Cada registro de log armazena a estrutura:
+`usuario_id`, `usuario_nome`, `usuario_email`, `acao`, `detalhes`, `ip`, `timestamp` e `servico_origem`.
+
+| Evento / Ação | Origem | Descrição |
+| :--- | :---: | :--- |
+| `CADASTRO_USUARIO` | `auth-service` | Registro de uma nova conta de usuário. |
+| `LOGIN_SUCESSO` | `auth-service` | Autenticação bem-sucedida no sistema. |
+| `LOGIN_FALHA_SENHA_INCORRETA` | `auth-service` | Tentativa de login com senha incorreta. |
+| `LOGIN_FALHA_USUARIO_NAO_ENCONTRADO` | `auth-service` | Tentativa de login com e-mail não existente. |
+| `LOGOUT` | `catalogo` | Encerramento voluntário de sessão. |
+| `FAVORITAR_FILME` | `catalogo` | Adição de um filme à lista de favoritos. |
+| `DESFAVORITAR_FILME` | `catalogo` | Remoção de um filme dos favoritos. |
+| `CRIAR_COMENTARIO` | `catalogo` | Publicação de comentário em um filme. |
+| `EXCLUIR_COMENTARIO_PROPRIO` | `catalogo` | Autor apagando o próprio comentário. |
+| `MODERAR_COMENTARIO_ADMIN` | `catalogo` | Administrador apagando comentário de outro usuário. |
+| `ALTERAR_ROLE_SUCESSO` | `auth-service` | Promoção ou rebaixamento de papel de usuário por admin. |
+| `ACESSO_NEGADO_403_ADMIN_ROUTE` | `catalogo` | **Tentativa bloqueada (403)**: usuário comum tentando acessar rotas administrativas (`/admin/usuarios`, `/admin/logs`). |
+| `ACESSO_NEGADO_403_MODERACAO` | `catalogo` | **Tentativa bloqueada (403)**: usuário comum tentando apagar comentário de outro usuário. |
+| `ACESSO_NEGADO_403_ALTERAR_ROLE` | `auth-service` | **Tentativa bloqueada (403)**: chamada não autorizada para alterar papel de usuário. |
+| `SOLICITAR_RECUPERACAO_SENHA` | `auth-service` | Geração de token de 30 minutos e envio de e-mail. |
+| `REDEFINIR_SENHA_SUCESSO` | `auth-service` | Atualização de senha concluída via token. |
+
+---
+
+## 🔒 Segurança e Isolamento de Rede
+
+- **Apenas o Catálogo (`web`) publica porta para o host**: `${PORT_HOST:-8204}:3000`.
+- Os serviços **`auth-service`**, **`log-service`** e **`redis`** **NÃO possuem portas expostas** no `docker-compose.yml`, ficando completamente invisíveis para a internet pública e acessíveis somente através da rede interna compartilhada `app-network` com subnet dedicada `10.82.4.0/24`.
+- A consulta aos logs de auditoria (`/admin/logs`) é restrita a Administradores através do middleware RBAC `requireAdmin`. Qualquer usuário comum que tente acessar a rota recebe **HTTP 403 Forbidden** e a tentativa é registrada no log de auditoria.
+
+---
+
+## 🐳 Configuração do `docker-compose.yml`
+
+```yaml
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "${PORT_HOST:-${PORT:-8204}}:3000"
+    environment:
+      - PORT=3000
+      - AUTH_SERVICE_URL=http://auth-service:3001
+      - LOG_SERVICE_URL=http://log-service:3002
+      - SESSION_SECRET=${SESSION_SECRET}
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - DB_HOST=${DB_HOST}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - DB_PORT=${DB_PORT:-3306}
+    depends_on:
+      - auth-service
+      - log-service
+    networks:
+      - app-network
+    restart: always
+
+  auth-service:
+    build: ./auth-service
+    environment:
+      - PORT=3001
+      - LOG_SERVICE_URL=http://log-service:3002
+      - DB_HOST=${DB_HOST}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME}
+      - DB_PORT=${DB_PORT:-3306}
+      - SMTP_HOST=${SMTP_HOST:-sandbox.smtp.mailtrap.io}
+      - SMTP_PORT=${SMTP_PORT:-2525}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_FROM=${SMTP_FROM:-"Catálogo Tom Hanks <no-reply@catalogofilmes.com>"}
+      - APP_URL=${APP_URL:-http://localhost:8204}
+    depends_on:
+      - log-service
+    networks:
+      - app-network
+    restart: always
+
+  log-service:
+    build: ./log-service
+    environment:
+      - PORT=3002
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_STREAM_KEY=audit_stream
+    depends_on:
+      - redis
+    networks:
+      - app-network
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    networks:
+      - app-network
+    restart: always
+
+networks:
+  app-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.82.4.0/24
 ```
 
 ---
 
-## 🧪 Demonstração dos Testes (Requisito 4)
+## 🧪 Demonstração dos Testes de Auditoria
 
-1. **Teste com Usuário Comum (`usuario`)**:
-   - Cadastre e faça login com uma conta com papel `usuario`.
-   - Adicione um comentário em um filme. Observe que você pode apagar o seu próprio comentário (`🗑️`).
-   - Tente apagar o comentário de outro usuário (o botão não existe e chamada direta via POST resulta em **HTTP 403 Forbidden**).
-   - Tente acessar `/admin/usuarios` diretamente pela URL ➔ O sistema bloqueia com **HTTP 403 Forbidden**.
-
-2. **Teste com Administrador (`admin`)**:
-   - Faça login com uma conta com papel `admin`.
-   - Acesse o catálogo: você verá o botão **`🗑️ Excluir (Admin)`** em comentários de qualquer usuário e poderá excluí-los com sucesso.
-   - Clique em **`🛡️ Painel Admin`** no cabeçalho: visualize a lista completa de usuários e altere papéis (*Promover a Admin* ou *Rebaixar para Usuário*).
+1. **Geração de Eventos com Usuário Comum**:
+   - Faça login com um usuário comum.
+   - Favorite um filme e adicione um comentário.
+   - Tente acessar `/admin/logs` diretamente na barra de endereços do navegador ➔ O acesso será recusado com a tela **`403 Forbidden`**.
+2. **Consulta e Auditoria com Administrador**:
+   - Faça logout e entre com uma conta `admin`.
+   - Clique no botão **`📜 Logs`** no cabeçalho ou acesse `/admin/logs`.
+   - Visualize a tabela com todos os eventos registrados em tempo real:
+     - O login do usuário comum;
+     - O filme favoritado e o comentário criado;
+     - O evento de segurança **`ACESSO_NEGADO_403_ADMIN_ROUTE`** com o IP do cliente e a rota tentada!
