@@ -47,7 +47,13 @@ function createTransporter() {
  */
 async function sendPasswordResetEmail(toEmail, userName, resetLink) {
   const transporter = createTransporter();
-  const from = process.env.SMTP_FROM || '"Catálogo Tom Hanks" <no-reply@catalogofilmes.com>';
+  const user = (process.env.SMTP_USER || '').trim();
+  let from = (process.env.SMTP_FROM || '').trim();
+
+  // Se o FROM for inválido (ex: URL do GitHub) ou vazio, usa o próprio e-mail SMTP_USER
+  if (!from || from.startsWith('http') || !from.includes('@')) {
+    from = user ? `"Catálogo Filmes" <${user}>` : '"Catálogo Tom Hanks" <no-reply@catalogofilmes.com>';
+  }
 
   const mailOptions = {
     from,

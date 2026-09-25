@@ -332,7 +332,7 @@ app.post('/auth/forgot-password', async (req, res) => {
       console.error('[Auth-Service] Falha ao enviar e-mail via SMTP:', mailErr.message);
       return res.status(500).json({
         success: false,
-        error: 'Erro ao enviar e-mail de recuperação. Verifique as configurações de SMTP.'
+        error: `Erro ao enviar e-mail (SMTP): ${mailErr.message}. Verifique as credenciais SMTP no Portainer.`
       });
     }
 
@@ -342,7 +342,7 @@ app.post('/auth/forgot-password', async (req, res) => {
     });
   } catch (error) {
     console.error('[Auth-Service] Erro ao solicitar recuperação de senha:', error);
-    return res.status(500).json({ success: false, error: 'Erro interno ao processar recuperação de senha.' });
+    return res.status(500).json({ success: false, error: `Erro interno ao processar recuperação: ${error.message}` });
   }
 });
 
@@ -470,7 +470,7 @@ app.post('/auth/reset-password', async (req, res) => {
   }
 });
 
-const PORT = process.env.INTERNAL_PORT || 3001;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`>>> [AUTH-SERVICE] RODANDO INTERNAMENTE NA PORTA ${PORT} <<<`);
 });
