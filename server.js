@@ -554,9 +554,9 @@ app.get('/logout', (req, res) => {
   res.redirect('/login');
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.INTERNAL_PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`>>> [CATÁLOGO] SERVIDOR RODANDO EM http://localhost:${PORT} <<<`);
+  console.log(`>>> [CATÁLOGO] SERVIDOR RODANDO INTERNAMENTE NA PORTA ${PORT} <<<`);
   console.log(`>>> [CATÁLOGO] Microsserviço de Auth conectado em: ${AUTH_SERVICE_URL} <<<`);
   console.log(`>>> [CATÁLOGO] Microsserviço de Logs conectado em: ${LOG_SERVICE_URL} <<<`);
 });

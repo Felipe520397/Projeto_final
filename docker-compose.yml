@@ -7,7 +7,7 @@ services:
     ports:
       - "${PORT_HOST:-${PORT:-8204}}:3000"
     environment:
-      - PORT=3000
+      - INTERNAL_PORT=3000
       - AUTH_SERVICE_URL=http://auth-service:3001
       - LOG_SERVICE_URL=http://log-service:3002
       - SESSION_SECRET=${SESSION_SECRET}

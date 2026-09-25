@@ -470,7 +470,7 @@ app.post('/auth/reset-password', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.INTERNAL_PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`>>> [AUTH-SERVICE] RODANDO INTERNAMENTE NA PORTA ${PORT} <<<`);
 });
