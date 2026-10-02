@@ -8,14 +8,8 @@ services:
       - "${PORT_HOST:-${PORT:-8204}}:3000"
     environment:
       - PORT=3000
-      - INTERNAL_PORT=3000
       - AUTH_SERVICE_URL=http://auth-service:3001
       - LOG_SERVICE_URL=http://log-service:3002
-      - MINIO_ENDPOINT=minio
-      - MINIO_PORT=9000
-      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
-      - MINIO_BUCKET=perfil-fotos
       - SESSION_SECRET=${SESSION_SECRET}
       - TMDB_API_KEY=${TMDB_API_KEY}
       - DB_HOST=${DB_HOST}
@@ -26,7 +20,6 @@ services:
     depends_on:
       - auth-service
       - log-service
-      - minio
     networks:
       - app-network
     restart: always
@@ -34,9 +27,9 @@ services:
   # SERVIÇO 2: Microsserviço de Autenticação (Acessível APENAS internamente)
   auth-service:
     build: ./auth-service
+    # Sem portas mapeadas pro host (isolado na rede interna)
     environment:
       - PORT=3001
-      - INTERNAL_PORT=3001
       - LOG_SERVICE_URL=http://log-service:3002
       - DB_HOST=${DB_HOST}
       - DB_USER=${DB_USER}
@@ -58,9 +51,9 @@ services:
   # SERVIÇO 3: Microsserviço de Logs e Auditoria (Acessível APENAS internamente)
   log-service:
     build: ./log-service
+    # Sem portas mapeadas pro host (isolado na rede interna)
     environment:
       - PORT=3002
-      - INTERNAL_PORT=3002
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_STREAM_KEY=audit_stream
@@ -74,17 +67,6 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes
-    networks:
-      - app-network
-    restart: always
-
-  # SERVIÇO 5: MinIO Object Storage (Armazenamento de Fotos de Perfil)
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
     networks:
       - app-network
     restart: always

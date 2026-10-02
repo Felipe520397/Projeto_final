@@ -29,27 +29,19 @@ async function initDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
-    // 2. Garantir que as colunas 'role', 'bio' e 'foto_url' existam
+    // 2. Garantir que a coluna 'role' exista caso a tabela já tenha sido criada anteriormente
     try {
-      const [columnsRole] = await connection.query("SHOW COLUMNS FROM usuarios LIKE 'role'");
-      if (columnsRole.length === 0) {
-        await connection.query("ALTER TABLE usuarios ADD COLUMN role VARCHAR(50) NOT NULL DEFAULT 'usuario'");
+      const [columns] = await connection.query(`
+        SHOW COLUMNS FROM usuarios LIKE 'role';
+      `);
+      if (columns.length === 0) {
+        await connection.query(`
+          ALTER TABLE usuarios ADD COLUMN role VARCHAR(50) NOT NULL DEFAULT 'usuario';
+        `);
         console.log('[Auth-Service DB] Coluna "role" adicionada à tabela "usuarios".');
       }
-
-      const [columnsBio] = await connection.query("SHOW COLUMNS FROM usuarios LIKE 'bio'");
-      if (columnsBio.length === 0) {
-        await connection.query("ALTER TABLE usuarios ADD COLUMN bio TEXT DEFAULT ''");
-        console.log('[Auth-Service DB] Coluna "bio" adicionada à tabela "usuarios".');
-      }
-
-      const [columnsFoto] = await connection.query("SHOW COLUMNS FROM usuarios LIKE 'foto_url'");
-      if (columnsFoto.length === 0) {
-        await connection.query("ALTER TABLE usuarios ADD COLUMN foto_url VARCHAR(500) DEFAULT ''");
-        console.log('[Auth-Service DB] Coluna "foto_url" adicionada à tabela "usuarios".');
-      }
     } catch (colErr) {
-      console.warn('[Auth-Service DB] Aviso ao verificar colunas de perfil:', colErr.message);
+      console.warn('[Auth-Service DB] Aviso ao verificar coluna role:', colErr.message);
     }
 
     // 3. Criação da tabela reset_tokens para recuperação de senha

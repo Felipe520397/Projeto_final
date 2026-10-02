@@ -2,11 +2,7 @@ const express = require('express');
 const session = require('express-session');
 const mysql = require('mysql2/promise');
 const axios = require('axios');
-const path = require('path');
-const multer = require('multer');
 require('dotenv').config();
-
-const { initMinioBucket, uploadProfilePhoto, getProfilePhotoStream } = require('./minioClient');
 
 const app = express();
 
@@ -14,22 +10,6 @@ app.set('view engine', 'ejs');
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static('public'));
-
-// Configuração do Multer (Upload em Memória, máx 5MB, somente imagens)
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 5 * 1024 * 1024 // 5 Megabytes
-  },
-  fileFilter: (req, file, cb) => {
-    const tiposPermitidos = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-    if (tiposPermitidos.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Formato de arquivo inválido. Apenas imagens (JPEG, PNG, WEBP, GIF) são permitidas.'));
-    }
-  }
-});
 
 // Configuração de Sessão
 app.use(session({
@@ -77,7 +57,7 @@ const pool = mysql.createPool({
   queueLimit: 0
 });
 
-// Inicialização das tabelas do catálogo (favoritos, comentários e migrações de perfil)
+// Inicialização das tabelas do catálogo (favoritos e comentários)
 async function initCatalogDb() {
   try {
     const conn = await pool.getConnection();
@@ -107,34 +87,23 @@ async function initCatalogDb() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
-    // Garante que as colunas usuario_nome, bio e foto_url existam
+    // Garante que a coluna usuario_nome exista caso a tabela já tenha sido criada anteriormente
     try {
-      const [colsNome] = await conn.query("SHOW COLUMNS FROM comentarios LIKE 'usuario_nome'");
-      if (colsNome.length === 0) {
+      const [cols] = await conn.query("SHOW COLUMNS FROM comentarios LIKE 'usuario_nome'");
+      if (cols.length === 0) {
         await conn.query("ALTER TABLE comentarios ADD COLUMN usuario_nome VARCHAR(255) DEFAULT 'Usuário'");
       }
-
-      const [colsBio] = await conn.query("SHOW COLUMNS FROM usuarios LIKE 'bio'");
-      if (colsBio.length === 0) {
-        await conn.query("ALTER TABLE usuarios ADD COLUMN bio TEXT DEFAULT ''");
-      }
-
-      const [colsFoto] = await conn.query("SHOW COLUMNS FROM usuarios LIKE 'foto_url'");
-      if (colsFoto.length === 0) {
-        await conn.query("ALTER TABLE usuarios ADD COLUMN foto_url VARCHAR(500) DEFAULT ''");
-      }
     } catch (colErr) {
-      console.warn('[Catalog DB] Aviso ao verificar colunas:', colErr.message);
+      console.warn('[Catalog DB] Aviso coluna usuario_nome:', colErr.message);
     }
 
     conn.release();
-    console.log('[Catalog DB] Tabelas do catálogo inicializadas com sucesso.');
+    console.log('[Catalog DB] Tabelas "favoritos" e "comentarios" prontas.');
   } catch (err) {
-    console.warn('[Catalog DB] Aviso ao inicializar banco de dados:', err.message);
+    console.warn('[Catalog DB] Aviso ao inicializar tabelas do catálogo:', err.message);
   }
 }
 initCatalogDb();
-initMinioBucket();
 
 // Middleware de Autenticação (Quem é você?)
 function checkAuth(req, res, next) {
@@ -151,7 +120,9 @@ function requireAdmin(req, res, next) {
     return res.redirect('/login');
   }
   
+  // Validação estrita no servidor (Enforcement de RBAC)
   if (req.session.usuario.role !== 'admin') {
+    // Registra tentativa negada no log de auditoria
     sendAuditLog(req, 'ACESSO_NEGADO_403_ADMIN_ROUTE', {
       rota_tentada: req.originalUrl,
       papel_usuario: req.session.usuario.role
@@ -167,21 +138,7 @@ function requireAdmin(req, res, next) {
 }
 
 // ==========================================
-// ROTA PÚBLICA DE PROXY DE FOTOS DO MINIO
-// ==========================================
-app.get('/uploads/perfil/:key', async (req, res) => {
-  try {
-    const { key } = req.params;
-    const stream = await getProfilePhotoStream(key);
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    stream.pipe(res);
-  } catch (err) {
-    res.status(404).send('Foto de perfil não encontrada no Object Storage.');
-  }
-});
-
-// ==========================================
-// ROTAS DE AUTENTICAÇÃO E CATÁLOGO
+// ROTAS DO CATÁLOGO E AUTENTICAÇÃO
 // ==========================================
 
 app.get('/', (req, res) => {
@@ -200,10 +157,11 @@ app.get('/login', (req, res) => {
 app.post('/login', async (req, res) => {
   const { email, senha } = req.body;
   try {
+    // Comunicação com o Microsserviço de Autenticação
     const response = await axios.post(`${AUTH_SERVICE_URL}/auth/login`, { email, senha });
 
     if (response.data && response.data.success) {
-      req.session.usuario = response.data.user;
+      req.session.usuario = response.data.user; // Armazena { id, nome, email, role }
       return res.redirect('/home');
     }
 
@@ -222,10 +180,11 @@ app.get('/cadastro', (req, res) => {
 app.post('/cadastro', async (req, res) => {
   const { nome, email, senha, role } = req.body;
   try {
+    // Comunicação com o Microsserviço de Autenticação
     const response = await axios.post(`${AUTH_SERVICE_URL}/auth/register`, { nome, email, senha, role });
 
     if (response.data && response.data.success) {
-      req.session.usuario = response.data.user;
+      req.session.usuario = response.data.user; // Armazena { id, nome, email, role }
       return res.redirect('/home');
     }
 
@@ -267,6 +226,7 @@ app.get('/redefinir-senha', async (req, res) => {
   }
 
   try {
+    // Valida o token no microsserviço (checa existência, validade < 30min e uso único)
     const response = await axios.get(`${AUTH_SERVICE_URL}/auth/validate-token/${token}`);
 
     res.render('redefinir-senha', {
@@ -320,6 +280,7 @@ app.post('/redefinir-senha', async (req, res) => {
 // HOME (CATÁLOGO DE FILMES)
 app.get('/home', checkAuth, async (req, res) => {
   try {
+    // 1. Busca favoritos do usuário logado
     let favoritos = [];
     try {
       const [rows] = await pool.query(
@@ -332,6 +293,7 @@ app.get('/home', checkAuth, async (req, res) => {
     }
     const favMap = new Set(favoritos.map(f => f.filme_id));
 
+    // 2. Busca todos os comentários (com autor e ID) para permitir exibição e moderação
     const commMap = {};
     try {
       const [comentarios] = await pool.query(
@@ -353,6 +315,7 @@ app.get('/home', checkAuth, async (req, res) => {
       console.log('Aviso comentarios:', dbErr.message);
     }
 
+    // 3. Busca filmes do TMDB no backend (sem expor chave ao cliente)
     let filmes = [];
     if (process.env.TMDB_API_KEY) {
       try {
@@ -390,7 +353,9 @@ app.post('/favoritar', checkAuth, async (req, res) => {
       [req.session.usuario.id, filme_id, titulo, poster_path]
     );
 
+    // Log de auditoria
     sendAuditLog(req, 'FAVORITAR_FILME', { filme_id, titulo });
+
     res.redirect('/home');
   } catch (error) {
     console.error('Erro ao favoritar:', error);
@@ -407,7 +372,9 @@ app.post('/desfavoritar', checkAuth, async (req, res) => {
       [req.session.usuario.id, filme_id]
     );
 
+    // Log de auditoria
     sendAuditLog(req, 'DESFAVORITAR_FILME', { filme_id });
+
     res.redirect('/home');
   } catch (error) {
     console.error('Erro ao desfavoritar:', error);
@@ -425,6 +392,7 @@ app.post('/comentar', checkAuth, async (req, res) => {
         [req.session.usuario.id, req.session.usuario.nome, filme_id, texto.trim()]
       );
 
+      // Log de auditoria
       sendAuditLog(req, 'CRIAR_COMENTARIO', {
         filme_id,
         texto_resumo: texto.trim().substring(0, 40)
@@ -437,7 +405,7 @@ app.post('/comentar', checkAuth, async (req, res) => {
   }
 });
 
-// Excluir Comentário (RBAC)
+// Excluir Comentário (RBAC: Usuário pode apagar o próprio; Admin pode apagar qualquer um)
 app.post('/comentarios/:id/deletar', checkAuth, async (req, res) => {
   const { id } = req.params;
   try {
@@ -450,7 +418,11 @@ app.post('/comentarios/:id/deletar', checkAuth, async (req, res) => {
     const isOwner = (comentario.usuario_id === req.session.usuario.id);
     const isAdmin = (req.session.usuario.role === 'admin');
 
+    // Validação estrita no servidor (Enforcement de RBAC com HTTP 403)
     if (!isOwner && !isAdmin) {
+      console.warn(`[RBAC] Usuário ID ${req.session.usuario.id} tentou apagar comentário de outro usuário sem ser admin.`);
+      
+      // Log de auditoria de segurança (tentativa bloqueada 403)
       sendAuditLog(req, 'ACESSO_NEGADO_403_MODERACAO', {
         comentario_id: id,
         autor_comentario_id: comentario.usuario_id,
@@ -459,12 +431,13 @@ app.post('/comentarios/:id/deletar', checkAuth, async (req, res) => {
 
       return res.status(403).render('403', {
         usuario: req.session.usuario,
-        mensagem: 'Acesso Negado (HTTP 403): Você não tem permissão para excluir o comentário de outro usuário.'
+        mensagem: 'Acesso Negado (HTTP 403): Você não tem permissão para excluir o comentário de outro usuário. Apenas Administradores podem moderar comentários de terceiros.'
       });
     }
 
     await pool.query('DELETE FROM comentarios WHERE id = ?', [id]);
 
+    // Log de auditoria (Diferenciação entre exclusão própria e moderação de admin)
     if (isAdmin && !isOwner) {
       sendAuditLog(req, 'MODERAR_COMENTARIO_ADMIN', {
         comentario_id: id,
@@ -487,166 +460,19 @@ app.post('/comentarios/:id/deletar', checkAuth, async (req, res) => {
 });
 
 // ==========================================
-// ROTAS DE PERFIL E UPLOAD MINIO (ATIVIDADE 6)
-// ==========================================
-
-// Visualizar Próprio Perfil
-app.get('/perfil', checkAuth, async (req, res) => {
-  try {
-    const [userRows] = await pool.query(
-      'SELECT id, nome, email, role, bio, foto_url, criado_em FROM usuarios WHERE id = ?',
-      [req.session.usuario.id]
-    );
-
-    if (userRows.length === 0) {
-      return res.redirect('/login');
-    }
-
-    const perfilUsuario = userRows[0];
-
-    const [favoritos] = await pool.query(
-      'SELECT filme_id, titulo, poster_path, criado_em FROM favoritos WHERE usuario_id = ? ORDER BY criado_em DESC',
-      [req.session.usuario.id]
-    );
-
-    res.render('perfil', {
-      usuario: req.session.usuario,
-      perfilUsuario,
-      favoritos,
-      isOwner: true,
-      sucesso: req.query.sucesso || null,
-      erro: req.query.erro || null
-    });
-  } catch (error) {
-    console.error('Erro ao carregar perfil:', error);
-    res.redirect('/home');
-  }
-});
-
-// Visualizar Perfil Público de Outro Usuário
-app.get('/perfil/:id', checkAuth, async (req, res) => {
-  const { id } = req.params;
-  try {
-    const [userRows] = await pool.query(
-      'SELECT id, nome, email, role, bio, foto_url, criado_em FROM usuarios WHERE id = ?',
-      [id]
-    );
-
-    if (userRows.length === 0) {
-      return res.status(404).send('Usuário não encontrado.');
-    }
-
-    const perfilUsuario = userRows[0];
-    const isOwner = (req.session.usuario.id == id);
-
-    const [favoritos] = await pool.query(
-      'SELECT filme_id, titulo, poster_path, criado_em FROM favoritos WHERE usuario_id = ? ORDER BY criado_em DESC',
-      [id]
-    );
-
-    res.render('perfil', {
-      usuario: req.session.usuario,
-      perfilUsuario,
-      favoritos,
-      isOwner,
-      sucesso: req.query.sucesso || null,
-      erro: req.query.erro || null
-    });
-  } catch (error) {
-    console.error('Erro ao carregar perfil público:', error);
-    res.redirect('/home');
-  }
-});
-
-// Editar Perfil com Upload de Imagem para MinIO (Requisito 4: Proteção RBAC)
-app.post('/perfil/editar', checkAuth, (req, res, next) => {
-  upload.single('foto')(req, res, (err) => {
-    if (err) {
-      return res.redirect(`/perfil?erro=${encodeURIComponent(err.message)}`);
-    }
-    next();
-  });
-}, async (req, res) => {
-  const loggedUserId = req.session.usuario.id;
-  const { nome, bio, usuario_id } = req.body;
-
-  // Enforcement de RBAC: Um usuário NUNCA pode editar perfil de outro
-  if (usuario_id && String(usuario_id) !== String(loggedUserId)) {
-    sendAuditLog(req, 'ACESSO_NEGADO_403_EDITAR_PERFIL_ALHEIO', {
-      usuario_alvo_id: usuario_id,
-      usuario_tentativa_id: loggedUserId
-    });
-
-    return res.status(403).render('403', {
-      usuario: req.session.usuario,
-      mensagem: 'Acesso Negado (HTTP 403): Você não tem permissão para editar o perfil de outro usuário.'
-    });
-  }
-
-  try {
-    let fotoUrlFinal = null;
-
-    // Se houver upload de arquivo, envia para o MinIO Object Storage
-    if (req.file) {
-      const ext = path.extname(req.file.originalname) || '.png';
-      const fileName = `avatar-${loggedUserId}-${Date.now()}${ext}`;
-
-      // Upload do binário para o MinIO
-      await uploadProfilePhoto(fileName, req.file.buffer, req.file.mimetype);
-      
-      // Chave / URL da imagem que será salva como referência no banco
-      fotoUrlFinal = `/uploads/perfil/${fileName}`;
-
-      sendAuditLog(req, 'UPLOAD_FOTO_PERFIL', {
-        arquivo: fileName,
-        tamanho_bytes: req.file.size,
-        mimetype: req.file.mimetype,
-        storage: 'MinIO'
-      });
-    }
-
-    const nomeFinal = (nome && nome.trim() !== '') ? nome.trim() : req.session.usuario.nome;
-    const bioFinal = bio !== undefined ? bio.trim() : '';
-
-    if (fotoUrlFinal) {
-      await pool.query(
-        'UPDATE usuarios SET nome = ?, bio = ?, foto_url = ? WHERE id = ?',
-        [nomeFinal, bioFinal, fotoUrlFinal, loggedUserId]
-      );
-      req.session.usuario.foto_url = fotoUrlFinal;
-    } else {
-      await pool.query(
-        'UPDATE usuarios SET nome = ?, bio = ? WHERE id = ?',
-        [nomeFinal, bioFinal, loggedUserId]
-      );
-    }
-
-    req.session.usuario.nome = nomeFinal;
-
-    sendAuditLog(req, 'ATUALIZAR_PERFIL', {
-      nome: nomeFinal,
-      bio_atualizada: bioFinal !== '',
-      foto_atualizada: Boolean(fotoUrlFinal)
-    });
-
-    res.redirect('/perfil?sucesso=Perfil atualizado com sucesso!');
-  } catch (error) {
-    console.error('Erro ao atualizar perfil:', error);
-    res.redirect(`/perfil?erro=${encodeURIComponent('Erro ao salvar alterações no perfil.')}`);
-  }
-});
-
-// ==========================================
 // ROTAS ADMINISTRATIVAS (EXCLUSIVAS PARA ADMIN)
 // ==========================================
 
+// Painel de Gerenciamento de Usuários e Moderação de Comentários
 app.get('/admin', requireAdmin, (req, res) => res.redirect('/admin/usuarios'));
 
 app.get('/admin/usuarios', requireAdmin, async (req, res) => {
   try {
+    // 1. Busca usuários no microsserviço de autenticação
     const response = await axios.get(`${AUTH_SERVICE_URL}/auth/users`);
     const usuarios = response.data.users || [];
 
+    // 2. Busca todos os comentários postados no catálogo para moderação
     let todosComentarios = [];
     try {
       const [rows] = await pool.query(
@@ -676,7 +502,7 @@ app.get('/admin/usuarios', requireAdmin, async (req, res) => {
   }
 });
 
-// Alterar Papel de Usuário
+// Alterar Papel de Usuário (Promover/Rebaixar)
 app.post('/admin/usuarios/:id/role', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { role } = req.body;
@@ -728,9 +554,9 @@ app.get('/logout', (req, res) => {
   res.redirect('/login');
 });
 
-const PORT = process.env.INTERNAL_PORT || 3000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`>>> [CATÁLOGO] SERVIDOR RODANDO INTERNAMENTE NA PORTA ${PORT} <<<`);
+  console.log(`>>> [CATÁLOGO] SERVIDOR RODANDO EM http://localhost:${PORT} <<<`);
   console.log(`>>> [CATÁLOGO] Microsserviço de Auth conectado em: ${AUTH_SERVICE_URL} <<<`);
   console.log(`>>> [CATÁLOGO] Microsserviço de Logs conectado em: ${LOG_SERVICE_URL} <<<`);
 });
