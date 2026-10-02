@@ -470,7 +470,13 @@ app.post('/auth/reset-password', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3001;
+// Alias de rotas para compatibilidade total
+app.post('/login', (req, res) => app._router.handle({ ...req, url: '/auth/login', originalUrl: '/auth/login' }, res));
+app.post(['/register', '/cadastro'], (req, res) => app._router.handle({ ...req, url: '/auth/register', originalUrl: '/auth/register' }, res));
+app.post(['/forgot-password', '/esqueci-senha'], (req, res) => app._router.handle({ ...req, url: '/auth/forgot-password', originalUrl: '/auth/forgot-password' }, res));
+app.post(['/reset-password', '/redefinir-senha'], (req, res) => app._router.handle({ ...req, url: '/auth/reset-password', originalUrl: '/auth/reset-password' }, res));
+
+const PORT = process.env.INTERNAL_PORT || process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`>>> [AUTH-SERVICE] RODANDO INTERNAMENTE NA PORTA ${PORT} <<<`);
 });

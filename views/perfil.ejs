@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Perfil — <%= perfilUsuario.nome %></title>
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #141414; color: #fff; }
+    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 15px; margin-bottom: 25px; }
+    .header-user { display: flex; align-items: center; gap: 10px; }
+    .role-badge { font-size: 0.75em; padding: 3px 8px; border-radius: 12px; font-weight: bold; text-transform: uppercase; }
+    .badge-admin { background: #e50914; color: white; }
+    .badge-user { background: #007bff; color: white; }
+    .btn-nav { color: #aaa; text-decoration: none; font-size: 0.9em; padding: 6px 12px; border: 1px solid #444; border-radius: 4px; transition: all 0.2s; }
+    .btn-nav:hover { color: #fff; border-color: #e50914; }
+    .btn-nav.active { background: #e50914; color: white; border-color: #e50914; }
+    
+    .profile-container { display: grid; grid-template-columns: 320px 1fr; gap: 25px; }
+    @media (max-width: 800px) {
+      .profile-container { grid-template-columns: 1fr; }
+    }
+
+    .card { background: #222; border-radius: 8px; padding: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+    .profile-header { text-align: center; }
+    .avatar-wrapper { position: relative; width: 140px; height: 140px; margin: 0 auto 15px; }
+    .avatar-img { width: 140px; height: 140px; border-radius: 50%; object-fit: cover; border: 3px solid #e50914; background: #333; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
+    .avatar-placeholder { width: 140px; height: 140px; border-radius: 50%; background: #333; display: flex; align-items: center; justify-content: center; font-size: 3em; color: #888; border: 3px solid #555; }
+    
+    h2 { margin: 10px 0 5px; font-size: 1.4em; }
+    .profile-email { color: #888; font-size: 0.9em; margin-bottom: 15px; }
+    .bio-box { background: #181818; border-radius: 6px; padding: 12px 15px; color: #ddd; font-style: italic; font-size: 0.9em; line-height: 1.4; border-left: 3px solid #e50914; margin: 15px 0; text-align: left; }
+    .member-since { font-size: 0.8em; color: #666; margin-top: 15px; }
+
+    .form-group { margin-bottom: 15px; text-align: left; }
+    label { display: block; margin-bottom: 6px; font-size: 0.85em; color: #bbb; font-weight: bold; }
+    input[type="text"], textarea { width: 100%; box-sizing: border-box; background: #333; color: white; border: 1px solid #555; padding: 10px; border-radius: 4px; font-family: inherit; font-size: 0.9em; }
+    input[type="file"] { width: 100%; box-sizing: border-box; background: #2a2a2a; color: #ccc; border: 1px dashed #666; padding: 10px; border-radius: 4px; font-size: 0.85em; cursor: pointer; }
+    .btn-submit { background: #e50914; color: white; border: none; padding: 10px 20px; border-radius: 4px; font-weight: bold; cursor: pointer; width: 100%; transition: background 0.2s; font-size: 0.95em; }
+    .btn-submit:hover { background: #b80710; }
+
+    .sucesso { background: rgba(70, 211, 105, 0.15); border: 1px solid #46d369; color: #46d369; padding: 12px; border-radius: 4px; font-size: 0.95em; margin-bottom: 20px; }
+    .erro { background: rgba(255, 77, 77, 0.15); border: 1px solid #ff4d4d; color: #ff8080; padding: 12px; border-radius: 4px; font-size: 0.95em; margin-bottom: 20px; }
+
+    .fav-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 15px; margin-top: 15px; }
+    .fav-card { background: #1a1a1a; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+    .fav-card img { width: 100%; height: 220px; object-fit: cover; }
+    .fav-card h4 { margin: 8px 10px 10px; font-size: 0.85em; text-align: center; color: #fff; line-height: 1.3; }
+    .storage-badge { background: rgba(0, 123, 255, 0.15); border: 1px solid #007bff; color: #70b4ff; font-size: 0.75em; padding: 3px 8px; border-radius: 10px; display: inline-block; margin-top: 5px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎬 Catálogo de Filmes — Perfil</h1>
+    <div class="header-user">
+      <span>Olá, <strong><%= usuario.nome %></strong></span>
+      <% if (usuario.role === 'admin') { %>
+        <span class="role-badge badge-admin">ADMIN</span>
+        <a href="/admin/usuarios" class="btn-nav">🛡️ Usuários</a>
+        <a href="/admin/logs" class="btn-nav">📜 Logs</a>
+      <% } else { %>
+        <span class="role-badge badge-user">USUÁRIO</span>
+      <% } %>
+      | <a href="/home" class="btn-nav">← Catálogo</a>
+      | <a href="/perfil" class="btn-nav <%= isOwner ? 'active' : '' %>">👤 Meu Perfil</a>
+      | <a href="/logout" style="color: #ff4d4d; text-decoration: none; font-weight: bold;">Sair</a>
+    </div>
+  </header>
+
+  <% if (locals.sucesso) { %>
+    <div class="sucesso">✅ <%= sucesso %></div>
+  <% } %>
+  <% if (locals.erro) { %>
+    <div class="erro">⚠️ <%= erro %></div>
+  <% } %>
+
+  <div class="profile-container">
+    <!-- Card do Perfil -->
+    <div class="card profile-header">
+      <div class="avatar-wrapper">
+        <% if (perfilUsuario.foto_url) { %>
+          <img src="<%= perfilUsuario.foto_url %>" alt="Foto de <%= perfilUsuario.nome %>" class="avatar-img">
+        <% } else { %>
+          <div class="avatar-placeholder">👤</div>
+        <% } %>
+      </div>
+
+      <h2><%= perfilUsuario.nome %></h2>
+      <div class="profile-email"><%= perfilUsuario.email %></div>
+      <span class="role-badge <%= perfilUsuario.role === 'admin' ? 'badge-admin' : 'badge-user' %>">
+        <%= perfilUsuario.role === 'admin' ? 'ADMINISTRADOR' : 'USUÁRIO' %>
+      </span>
+
+      <div class="bio-box">
+        <%= perfilUsuario.bio && perfilUsuario.bio.trim() !== '' ? perfilUsuario.bio : 'Nenhuma biografia adicionada ainda.' %>
+      </div>
+
+      <div class="storage-badge">📦 Foto guardada no MinIO Object Storage</div>
+
+      <% if (perfilUsuario.criado_em) { %>
+        <div class="member-since">
+          Membro desde: <%= new Date(perfilUsuario.criado_em).toLocaleDateString('pt-BR') %>
+        </div>
+      <% } %>
+
+      <!-- Formulário de Edição (Apenas para o Dono do Perfil) -->
+      <% if (isOwner) { %>
+        <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
+        <form action="/perfil/editar" method="POST" enctype="multipart/form-data">
+          <!-- Campo oculto para proteção RBAC -->
+          <input type="hidden" name="usuario_id" value="<%= usuario.id %>">
+
+          <div class="form-group">
+            <label for="nome">Editar Nome:</label>
+            <input type="text" id="nome" name="nome" value="<%= perfilUsuario.nome %>" required>
+          </div>
+
+          <div class="form-group">
+            <label for="bio">Biografia / Sobre Você:</label>
+            <textarea id="bio" name="bio" rows="3" placeholder="Fale um pouco sobre seus gostos de cinema..."><%= perfilUsuario.bio || '' %></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="foto">Foto de Perfil (JPG, PNG, WEBP - máx 5MB):</label>
+            <input type="file" id="foto" name="foto" accept="image/*">
+          </div>
+
+          <button type="submit" class="btn-submit">💾 Salvar Alterações</button>
+        </form>
+      <% } else { %>
+        <div style="margin-top: 20px; font-size: 0.85em; color: #888;">
+          🔒 Você está visualizando o perfil público deste usuário.
+        </div>
+      <% } %>
+    </div>
+
+    <!-- Filmes Favoritos do Usuário -->
+    <div class="card">
+      <h3 style="margin-top: 0; color: #e50914; display: flex; align-items: center; gap: 8px;">
+        ⭐ Filmes Favoritados (<%= favoritos.length %>)
+      </h3>
+
+      <% if (favoritos.length === 0) { %>
+        <p style="color: #888; font-style: italic; margin-top: 20px;">
+          <%= isOwner ? 'Você ainda não favoritou nenhum filme do catálogo.' : 'Este usuário ainda não favoritou nenhum filme.' %>
+        </p>
+      <% } else { %>
+        <div class="fav-grid">
+          <% favoritos.forEach(fav => { %>
+            <div class="fav-card">
+              <% if (fav.poster_path) { %>
+                <img src="<%= fav.poster_path %>" alt="<%= fav.titulo %>">
+              <% } else { %>
+                <div style="height: 220px; background: #333; display: flex; align-items: center; justify-content: center; font-size: 0.8em; color: #888;">Sem Foto</div>
+              <% } %>
+              <h4><%= fav.titulo %></h4>
+            </div>
+          <% }) %>
+        </div>
+      <% } %>
+    </div>
+  </div>
+</body>
+</html>
