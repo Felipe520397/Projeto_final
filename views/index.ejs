@@ -39,7 +39,7 @@
   <header>
     <h1>Catálogo de Filmes — Tom Hanks</h1>
     <div class="header-user">
-      <span>Olá, <strong><%= usuario.nome %></strong></span>
+      <span>Olá, <a href="/perfil" style="color: #fff; text-decoration: none;"><strong><%= usuario.nome %></strong></a></span>
       <% if (usuario.role === 'admin') { %>
         <span class="role-badge badge-admin">ADMIN</span>
         <a href="/admin/usuarios" class="btn-admin-nav">🛡️ Usuários</a>
@@ -47,6 +47,7 @@
       <% } else { %>
         <span class="role-badge badge-user">USUÁRIO</span>
       <% } %>
+      <a href="/perfil" class="btn-admin-nav" style="border-color: #28a745;">👤 Perfil</a>
       | <a href="/logout" class="logout">Sair</a>
     </div>
   </header>

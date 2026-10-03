@@ -1,4 +1,4 @@
-# Catálogo de Filmes — Tom Hanks (Microsserviços, RBAC & Logs de Auditoria com Redis)
+# Catálogo de Filmes — Tom Hanks (Microsserviços, RBAC, Redis Streams & MinIO Object Storage)
 
 Aplicação desenvolvida para a disciplina **ISW055 - Introdução à Computação em Nuvem**, ministrada pelo professor **[@siriani](https://github.com/siriani)** ([github.com/siriani](https://github.com/siriani)).
 
@@ -9,92 +9,90 @@ Aplicação desenvolvida para a disciplina **ISW055 - Introdução à Computaç�
 - **Atividade 2 (Monólito)**: 1 container único com catálogo, login, banco e regras no mesmo deploy.
 - **Atividade 3 (Serviços Desacoplados)**: Separação em 2 containers (`web` e `auth-service`) com rede interna Docker, roles e recuperação de senha por e-mail com tokens de 30 min via SMTP.
 - **Atividade 4 (Autorização RBAC)**: Controle de acesso baseado em papéis com validação estrita no servidor (HTTP 403) e moderação de comentários por administradores.
-- **Atividade 5 (Logs e Auditoria com Redis Streams - Atual)**: Centralização de logs de auditoria em um novo microsserviço (`log-service`) com persistência em **Redis Streams** (`XADD` e `XREVRANGE`), rastreando quem fez o quê, quando e de qual IP.
+- **Atividade 5 (Logs e Auditoria com Redis Streams)**: Centralização de logs de auditoria em microsserviço dedicado (`log-service`) com persistência em **Redis Streams** (`XADD` e `XREVRANGE`), rastreando quem fez o quê, quando e de qual IP.
+- **Atividade 6 (Upload e Perfil de Usuário com MinIO - Atual)**: O catálogo vira uma rede social com perfis públicos (`/perfil/:id`), edição de bio e upload de fotos para Object Storage (**MinIO**), armazenando apenas a referência/chave no **MariaDB** e aplicando isolamento estrito de edição (cada um só edita seu próprio perfil).
 
 ---
 
-## 🏗️ Arquitetura do Sistema (4 Containers)
+## 🏗️ Arquitetura do Sistema (5 Containers)
 
 ```
-+-------------------------------------------------------------------------+
-|                              NAVEGADOR                                  |
-|                   (Usuário Comum ou Administrador)                      |
-+------------------------------------+------------------------------------+
-                                     |
-                       [HTTP / HTTPS]| Porta Pública (ex: :8204)
-                                     v
-+------------------------------------+------------------------------------+
-| CONTAINER 1: CATALOG-SERVICE (Ponto de Entrada Público)                 |
-| - SSR EJS: Catálogo, Favoritos, Comentários, Painéis Admin              |
-| - Dispara logs de eventos para o log-service via HTTP interno          |
-| - Rota /admin/logs protegida por RBAC (requireAdmin)                    |
-+-------------------+--------------------------------+--------------------+
-                    |                                |
-   [HTTP Interno]   |                                | [HTTP Interno]
- (http://auth:3001) |                                | (http://log-service:3002)
-                    v                                v
-+-------------------+---------------+   +------------+--------------------+
-| CONTAINER 2: AUTH-SERVICE         |   | CONTAINER 3: LOG-SERVICE           |
-| - Login, Cadastro, Roles, Senha   |   | - Endpoints: POST /logs, GET /logs |
-| - Dispara logs de eventos         |-->| - Comunica com Redis via Streams   |
-+-------------------+---------------+   +------------+--------------------+
-                    |                                |
-                    v                                v
-+-------------------+---------------+   +------------+--------------------+
-|     BANCO RELACIONAL: MariaDB     |   |    BANCO DE EVENTOS: REDIS         |
-| - usuarios, reset_tokens, etc.    |   | - Redis Streams (audit_stream)     |
-+-----------------------------------+   +---------------------------------+
++---------------------------------------------------------------------------------+
+|                                    NAVEGADOR                                    |
+|              (Upload de Foto, Visualização de Perfis, Favoritos, Catálogo)      |
++----------------------------------------+----------------------------------------+
+                                         |
+                           [HTTP / HTTPS]| Porta Pública (ex: :8204)
+                                         v
++----------------------------------------+----------------------------------------+
+| CONTAINER 1: CATALOG-SERVICE (Ponto de Entrada Público)                         |
+| - SSR EJS: /perfil, /perfil/:id, /home, /admin                                  |
+| - Rota POST /perfil/editar com upload de imagem via Multer                      |
+| - Envia arquivo binário para MinIO e salva referência no banco                 |
+| - Enforcement RBAC: Cada usuário só edita seu próprio perfil                    |
+| - Registra logs de auditoria no log-service                                    |
++------------+--------------------+---------------------+-------------------------+
+             |                    |                     |
+   [HTTP]    |          [HTTP]    |           [S3 API]  |
+(auth:3001)  |     (log-service)  |       (minio:9000)  |
+             v                    v                     v
++------------+--------+  +--------+------------+  +-----+-------------------------+
+| CONTAINER 2:        |  | CONTAINER 3:        |  | CONTAINER 5:                  |
+| AUTH-SERVICE        |  | LOG-SERVICE         |  | MINIO OBJECT STORAGE          |
+| - Login, Cadastro   |  | - Registro eventos  |  | - Bucket: perfil-fotos        |
+| - Reset de Senha    |  | - Redis Streams     |  | - Armazena imagens binárias   |
++------------+--------+  +--------+------------+  +-------------------------------+
+             |                    |
+             v                    v
++------------+--------+  +--------+------------+
+| CONTAINER MariaDB   |  | CONTAINER 4: REDIS  |
+| - Colunas: bio,     |  | - audit_stream      |
+|   foto_url/key      |  |   (Eventos reais)   |
++---------------------+  +---------------------+
 ```
 
 ---
 
-## 📜 Logs e Auditoria — Por que Redis Streams?
+## 📦 MinIO Object Storage — Por que não guardar imagem no Banco?
 
-### Por que um microsserviço próprio?
-Misturar logs de auditoria no banco relacional da aplicação (MariaDB) acopla responsabilidades que mudam por motivos distintos. Logs de auditoria possuem um padrão de uso com **altíssimo volume de escrita, baixa necessidade de transações ACID complexas e leitura quase exclusiva para consulta/auditoria**. Desacoplar em um serviço próprio (`log-service`) garante que a escrita de logs não onere as tabelas relacionais do sistema.
+### 1. Por que o arquivo não fica no MariaDB?
+Guardar arquivos binários em colunas do tipo `BLOB` em bancos relacionais degrada o desempenho:
+- Bancos relacionais são otimizados para dados tabulares pequenos, indexação rápida e transações ACID.
+- Arquivos binários inflacionam o tamanho das páginas de dados do InnoDB, tornando backups lentos, consumindo memória de cache de forma ineficiente e encarecendo a escala horizontal.
+- A arquitetura moderna utiliza **Object Storage (S3 / MinIO)** para guardar os binários, e armazena **apenas a chave/URL da foto (`foto_url`)** no MariaDB.
 
-### Por que Redis Streams?
-O Redis é extremamente rápido para escrita em memória com persistência AOF (`--appendonly yes`). O recurso **Redis Streams** foi desenhado especificamente para logs e fluxos de eventos ordenados no tempo:
-- **`XADD audit_stream MAXLEN ~ 5000 * ...`**: Grava os eventos no stream gerando automaticamente IDs baseados em timestamp milissegundo, mantendo uma fila limitada em memória.
-- **`XREVRANGE audit_stream + - COUNT <limite>`**: Permite ao painel administrativo consultar instantaneamente os eventos mais recentes em ordem cronológica decrescente.
+### 2. Decisão Arquitetural: Bucket com Leitura Pública vs URL Pré-Assinada
+- **Nossa Escolha**: **Bucket com Política de Leitura Pública / Proxy via Catálogo (`/uploads/perfil/:key`)**.
+- **Justificativa do Trade-off**:
+  - Em uma rede social/catálogo público, as fotos de perfil são públicas por natureza e acessadas frequentemente por todos os usuários na listagem de comentários e na página de perfil.
+  - O uso de bucket público com rota de proxy otimiza o cache HTTP (`Cache-Control: public`), reduz o overhead computacional de gerar assinaturas criptográficas temporárias para cada requisição e garante disponibilidade contínua sem risco de links expirados.
+  - URLs pré-assinadas seriam mais adequadas para documentos confidenciais ou relatórios privados que demandam expiração temporária estrita.
 
 ---
 
-## 📋 Eventos Auditados no Sistema
+## 🛡️ Controle de Acesso e Segurança (Requisito 4)
 
-Cada registro de log armazena a estrutura:
-`usuario_id`, `usuario_nome`, `usuario_email`, `acao`, `detalhes`, `ip`, `timestamp` e `servico_origem`.
+- **Cada usuário só edita seu próprio perfil**: No endpoint `POST /perfil/editar`, o backend valida a identidade diretamente na sessão do usuário (`req.session.usuario.id`), desconsiderando qualquer ID adulterado no corpo da requisição.
+- Se um usuário malicioso tentar forçar a edição do perfil de outra pessoa, o sistema rejeita imediatamente com **HTTP 403 Forbidden** e dispara o evento `ACESSO_NEGADO_403_EDITAR_PERFIL_ALHEIO` para o `log-service`.
 
-| Evento / Ação | Origem | Descrição |
+---
+
+## 📋 Lista de Eventos de Auditoria
+
+| Evento | Origem | Descrição |
 | :--- | :---: | :--- |
-| `CADASTRO_USUARIO` | `auth-service` | Registro de uma nova conta de usuário. |
-| `LOGIN_SUCESSO` | `auth-service` | Autenticação bem-sucedida no sistema. |
-| `LOGIN_FALHA_SENHA_INCORRETA` | `auth-service` | Tentativa de login com senha incorreta. |
-| `LOGIN_FALHA_USUARIO_NAO_ENCONTRADO` | `auth-service` | Tentativa de login com e-mail não existente. |
-| `LOGOUT` | `catalogo` | Encerramento voluntário de sessão. |
-| `FAVORITAR_FILME` | `catalogo` | Adição de um filme à lista de favoritos. |
-| `DESFAVORITAR_FILME` | `catalogo` | Remoção de um filme dos favoritos. |
-| `CRIAR_COMENTARIO` | `catalogo` | Publicação de comentário em um filme. |
-| `EXCLUIR_COMENTARIO_PROPRIO` | `catalogo` | Autor apagando o próprio comentário. |
-| `MODERAR_COMENTARIO_ADMIN` | `catalogo` | Administrador apagando comentário de outro usuário. |
-| `ALTERAR_ROLE_SUCESSO` | `auth-service` | Promoção ou rebaixamento de papel de usuário por admin. |
-| `ACESSO_NEGADO_403_ADMIN_ROUTE` | `catalogo` | **Tentativa bloqueada (403)**: usuário comum tentando acessar rotas administrativas (`/admin/usuarios`, `/admin/logs`). |
-| `ACESSO_NEGADO_403_MODERACAO` | `catalogo` | **Tentativa bloqueada (403)**: usuário comum tentando apagar comentário de outro usuário. |
-| `ACESSO_NEGADO_403_ALTERAR_ROLE` | `auth-service` | **Tentativa bloqueada (403)**: chamada não autorizada para alterar papel de usuário. |
-| `SOLICITAR_RECUPERACAO_SENHA` | `auth-service` | Geração de token de 30 minutos e envio de e-mail. |
-| `REDEFINIR_SENHA_SUCESSO` | `auth-service` | Atualização de senha concluída via token. |
+| `UPLOAD_FOTO_PERFIL` | `catalogo` | Upload de nova imagem para o MinIO Object Storage. |
+| `ATUALIZAR_PERFIL` | `catalogo` | Atualização de biografia e nome do usuário. |
+| `ACESSO_NEGADO_403_EDITAR_PERFIL_ALHEIO` | `catalogo` | **Segurança (403)**: Tentativa de editar perfil de outro usuário. |
+| `LOGIN_SUCESSO` / `LOGIN_FALHA` | `auth-service` | Eventos de autenticação com dados de IP. |
+| `CADASTRO_USUARIO` | `auth-service` | Criação de novas contas. |
+| `FAVORITAR_FILME` / `DESFAVORITAR_FILME` | `catalogo` | Ações no catálogo. |
+| `CRIAR_COMENTARIO` / `MODERAR_COMENTARIO_ADMIN` | `catalogo` | Comentários e moderação administrativa. |
+| `ACESSO_NEGADO_403_ADMIN_ROUTE` | `catalogo` | Tentativa bloqueada de acessar rotas de admin. |
 
 ---
 
-## 🔒 Segurança e Isolamento de Rede
-
-- **Apenas o Catálogo (`web`) publica porta para o host**: `${PORT_HOST:-8204}:3000`.
-- Os serviços **`auth-service`**, **`log-service`** e **`redis`** **NÃO possuem portas expostas** no `docker-compose.yml`, ficando completamente invisíveis para a internet pública e acessíveis somente através da rede interna compartilhada `app-network` com subnet dedicada `10.82.4.0/24`.
-- A consulta aos logs de auditoria (`/admin/logs`) é restrita a Administradores através do middleware RBAC `requireAdmin`. Qualquer usuário comum que tente acessar a rota recebe **HTTP 403 Forbidden** e a tentativa é registrada no log de auditoria.
-
----
-
-## 🐳 Configuração do `docker-compose.yml`
+## 🐳 Configuração do `docker-compose.yml` (5 Containers)
 
 ```yaml
 version: '3.8'
@@ -106,8 +104,14 @@ services:
       - "${PORT_HOST:-${PORT:-8204}}:3000"
     environment:
       - PORT=3000
+      - INTERNAL_PORT=3000
       - AUTH_SERVICE_URL=http://auth-service:3001
       - LOG_SERVICE_URL=http://log-service:3002
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_BUCKET=perfil-fotos
       - SESSION_SECRET=${SESSION_SECRET}
       - TMDB_API_KEY=${TMDB_API_KEY}
       - DB_HOST=${DB_HOST}
@@ -118,6 +122,7 @@ services:
     depends_on:
       - auth-service
       - log-service
+      - minio
     networks:
       - app-network
     restart: always
@@ -126,6 +131,7 @@ services:
     build: ./auth-service
     environment:
       - PORT=3001
+      - INTERNAL_PORT=3001
       - LOG_SERVICE_URL=http://log-service:3002
       - DB_HOST=${DB_HOST}
       - DB_USER=${DB_USER}
@@ -148,6 +154,7 @@ services:
     build: ./log-service
     environment:
       - PORT=3002
+      - INTERNAL_PORT=3002
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_STREAM_KEY=audit_stream
@@ -164,6 +171,16 @@ services:
       - app-network
     restart: always
 
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+    networks:
+      - app-network
+    restart: always
+
 networks:
   app-network:
     driver: bridge
@@ -174,16 +191,16 @@ networks:
 
 ---
 
-## 🧪 Demonstração dos Testes de Auditoria
+## 🧪 Roteiro de Demonstração e Testes
 
-1. **Geração de Eventos com Usuário Comum**:
-   - Faça login com um usuário comum.
-   - Favorite um filme e adicione um comentário.
-   - Tente acessar `/admin/logs` diretamente na barra de endereços do navegador ➔ O acesso será recusado com a tela **`403 Forbidden`**.
-2. **Consulta e Auditoria com Administrador**:
-   - Faça logout e entre com uma conta `admin`.
-   - Clique no botão **`📜 Logs`** no cabeçalho ou acesse `/admin/logs`.
-   - Visualize a tabela com todos os eventos registrados em tempo real:
-     - O login do usuário comum;
-     - O filme favoritado e o comentário criado;
-     - O evento de segurança **`ACESSO_NEGADO_403_ADMIN_ROUTE`** com o IP do cliente e a rota tentada!
+1. **Acessar o Perfil e Fazer Upload**:
+   - Faça login no site.
+   - Clique em **`👤 Perfil`** no menu superior.
+   - Digite uma biografia e selecione uma foto de perfil (JPG/PNG).
+   - Clique em **`Salvar Alterações`** ➔ A imagem é salva no MinIO e exibida no avatar em tempo real!
+2. **Visualizar Perfil Público e Favoritos**:
+   - Acesse `/perfil/:id` para ver o perfil público de outro usuário com seus filmes favoritos.
+3. **Testar Proteção RBAC**:
+   - Tente enviar um formulário de edição forçando o ID de outro usuário ➔ O servidor recusa com **HTTP 403 Forbidden**.
+4. **Verificar os Logs de Auditoria**:
+   - Acesse `/admin/logs` com usuário admin e veja os eventos `UPLOAD_FOTO_PERFIL` e `ATUALIZAR_PERFIL` registrados com sucesso!
