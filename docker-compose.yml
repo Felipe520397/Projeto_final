@@ -80,7 +80,7 @@ services:
 
   # SERVIÇO 5: MinIO Object Storage (Armazenamento de Fotos de Perfil)
   minio:
-    image: minio/minio:latest
+    image: elestio/minio:latest
     command: server /data --console-address ":9001"
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
