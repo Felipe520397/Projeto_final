@@ -116,12 +116,12 @@ async function initCatalogDb() {
 
       const [colsBio] = await conn.query("SHOW COLUMNS FROM usuarios LIKE 'bio'");
       if (colsBio.length === 0) {
-        await conn.query("ALTER TABLE usuarios ADD COLUMN bio TEXT DEFAULT ''");
+        await conn.query("ALTER TABLE usuarios ADD COLUMN bio TEXT NULL");
       }
 
       const [colsFoto] = await conn.query("SHOW COLUMNS FROM usuarios LIKE 'foto_url'");
       if (colsFoto.length === 0) {
-        await conn.query("ALTER TABLE usuarios ADD COLUMN foto_url VARCHAR(500) DEFAULT ''");
+        await conn.query("ALTER TABLE usuarios ADD COLUMN foto_url VARCHAR(500) NULL");
       }
     } catch (colErr) {
       console.warn('[Catalog DB] Aviso ao verificar colunas:', colErr.message);
@@ -493,21 +493,49 @@ app.post('/comentarios/:id/deletar', checkAuth, async (req, res) => {
 // Visualizar Próprio Perfil
 app.get('/perfil', checkAuth, async (req, res) => {
   try {
-    const [userRows] = await pool.query(
-      'SELECT id, nome, email, role, bio, foto_url, criado_em FROM usuarios WHERE id = ?',
-      [req.session.usuario.id]
-    );
+    let perfilUsuario = {
+      id: req.session.usuario.id,
+      nome: req.session.usuario.nome,
+      email: req.session.usuario.email,
+      role: req.session.usuario.role,
+      bio: '',
+      foto_url: null,
+      criado_em: new Date()
+    };
 
-    if (userRows.length === 0) {
-      return res.redirect('/login');
+    try {
+      const [userRows] = await pool.query(
+        'SELECT id, nome, email, role, bio, foto_url, criado_em FROM usuarios WHERE id = ?',
+        [req.session.usuario.id]
+      );
+      if (userRows.length > 0) {
+        perfilUsuario = { ...perfilUsuario, ...userRows[0] };
+      }
+    } catch (dbErr) {
+      console.warn('[Perfil] Aviso ao buscar dados completos do usuário:', dbErr.message);
+      try {
+        const [fallbackRows] = await pool.query(
+          'SELECT id, nome, email, role, criado_em FROM usuarios WHERE id = ?',
+          [req.session.usuario.id]
+        );
+        if (fallbackRows.length > 0) {
+          perfilUsuario = { ...perfilUsuario, ...fallbackRows[0] };
+        }
+      } catch (fbErr) {
+        console.warn('[Perfil] Fallback usuário:', fbErr.message);
+      }
     }
 
-    const perfilUsuario = userRows[0];
-
-    const [favoritos] = await pool.query(
-      'SELECT filme_id, titulo, poster_path, criado_em FROM favoritos WHERE usuario_id = ? ORDER BY criado_em DESC',
-      [req.session.usuario.id]
-    );
+    let favoritos = [];
+    try {
+      const [favRows] = await pool.query(
+        'SELECT filme_id, titulo, poster_path, criado_em FROM favoritos WHERE usuario_id = ? ORDER BY criado_em DESC',
+        [req.session.usuario.id]
+      );
+      favoritos = favRows;
+    } catch (favErr) {
+      console.warn('[Perfil] Aviso favoritos:', favErr.message);
+    }
 
     res.render('perfil', {
       usuario: req.session.usuario,
@@ -518,8 +546,8 @@ app.get('/perfil', checkAuth, async (req, res) => {
       erro: req.query.erro || null
     });
   } catch (error) {
-    console.error('Erro ao carregar perfil:', error);
-    res.redirect('/home');
+    console.error('Erro crítico ao carregar perfil:', error);
+    res.status(500).send(`Erro ao carregar perfil: ${error.message}`);
   }
 });
 
@@ -527,22 +555,47 @@ app.get('/perfil', checkAuth, async (req, res) => {
 app.get('/perfil/:id', checkAuth, async (req, res) => {
   const { id } = req.params;
   try {
-    const [userRows] = await pool.query(
-      'SELECT id, nome, email, role, bio, foto_url, criado_em FROM usuarios WHERE id = ?',
-      [id]
-    );
+    let perfilUsuario = null;
 
-    if (userRows.length === 0) {
+    try {
+      const [userRows] = await pool.query(
+        'SELECT id, nome, email, role, bio, foto_url, criado_em FROM usuarios WHERE id = ?',
+        [id]
+      );
+      if (userRows.length > 0) {
+        perfilUsuario = userRows[0];
+      }
+    } catch (dbErr) {
+      console.warn('[Perfil Publico] Aviso colunas:', dbErr.message);
+      try {
+        const [fallbackRows] = await pool.query(
+          'SELECT id, nome, email, role, criado_em FROM usuarios WHERE id = ?',
+          [id]
+        );
+        if (fallbackRows.length > 0) {
+          perfilUsuario = { ...fallbackRows[0], bio: '', foto_url: null };
+        }
+      } catch (fbErr) {
+        console.warn('[Perfil Publico] Fallback:', fbErr.message);
+      }
+    }
+
+    if (!perfilUsuario) {
       return res.status(404).send('Usuário não encontrado.');
     }
 
-    const perfilUsuario = userRows[0];
     const isOwner = (req.session.usuario.id == id);
 
-    const [favoritos] = await pool.query(
-      'SELECT filme_id, titulo, poster_path, criado_em FROM favoritos WHERE usuario_id = ? ORDER BY criado_em DESC',
-      [id]
-    );
+    let favoritos = [];
+    try {
+      const [favRows] = await pool.query(
+        'SELECT filme_id, titulo, poster_path, criado_em FROM favoritos WHERE usuario_id = ? ORDER BY criado_em DESC',
+        [id]
+      );
+      favoritos = favRows;
+    } catch (favErr) {
+      console.warn('[Perfil Publico] Aviso favoritos:', favErr.message);
+    }
 
     res.render('perfil', {
       usuario: req.session.usuario,
@@ -554,7 +607,7 @@ app.get('/perfil/:id', checkAuth, async (req, res) => {
     });
   } catch (error) {
     console.error('Erro ao carregar perfil público:', error);
-    res.redirect('/home');
+    res.status(500).send(`Erro ao carregar perfil público: ${error.message}`);
   }
 });
 

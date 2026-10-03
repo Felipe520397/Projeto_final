@@ -39,13 +39,13 @@ async function initDatabase() {
 
       const [columnsBio] = await connection.query("SHOW COLUMNS FROM usuarios LIKE 'bio'");
       if (columnsBio.length === 0) {
-        await connection.query("ALTER TABLE usuarios ADD COLUMN bio TEXT DEFAULT ''");
+        await connection.query("ALTER TABLE usuarios ADD COLUMN bio TEXT NULL");
         console.log('[Auth-Service DB] Coluna "bio" adicionada à tabela "usuarios".');
       }
 
       const [columnsFoto] = await connection.query("SHOW COLUMNS FROM usuarios LIKE 'foto_url'");
       if (columnsFoto.length === 0) {
-        await connection.query("ALTER TABLE usuarios ADD COLUMN foto_url VARCHAR(500) DEFAULT ''");
+        await connection.query("ALTER TABLE usuarios ADD COLUMN foto_url VARCHAR(500) NULL");
         console.log('[Auth-Service DB] Coluna "foto_url" adicionada à tabela "usuarios".');
       }
     } catch (colErr) {
