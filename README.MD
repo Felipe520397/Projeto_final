@@ -3,7 +3,10 @@
 Aplicação desenvolvida para a disciplina **ISW055 - Introdução à Computação em Nuvem**, ministrada pelo professor **[@siriani](https://github.com/siriani)** ([github.com/siriani](https://github.com/siriani)).
 
 ---
-
+> ### 📄 Relatório (P1)
+> Metodologia, arquitetura e evidências de cada entrega do bimestre, em PDF:
+> *[📥 docs/P1_ISW055_Felipe_Soares.pdf](docs/P1_ISW055_Felipe_Soares.pdf)*
+---
 ## 📌 Linha do Tempo e Evolução do Projeto
 
 - **Atividade 2 (Monólito)**: 1 container único com catálogo, login, banco e regras no mesmo deploy.
@@ -204,3 +207,4 @@ networks:
    - Tente enviar um formulário de edição forçando o ID de outro usuário ➔ O servidor recusa com **HTTP 403 Forbidden**.
 4. **Verificar os Logs de Auditoria**:
    - Acesse `/admin/logs` com usuário admin e veja os eventos `UPLOAD_FOTO_PERFIL` e `ATUALIZAR_PERFIL` registrados com sucesso!
+
