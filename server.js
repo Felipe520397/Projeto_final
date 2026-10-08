@@ -840,9 +840,9 @@ app.all(['/checkout/premium', '/checkout'], checkAuth, async (req, res) => {
       }];
     }
 
-    // Criação da sessão de checkout no Stripe (Modo de Teste)
+    // Criação da sessão de checkout no Stripe (Modo de Teste com Dynamic Payment Methods)
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
+      line_items: lineItems,
       mode: 'subscription',
       customer_email: req.session.usuario.email,
       client_reference_id: String(req.session.usuario.id),
