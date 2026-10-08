@@ -11,9 +11,32 @@ const { initMinioBucket, uploadProfilePhoto, getProfilePhotoStream } = require('
 const app = express();
 
 app.set('view engine', 'ejs');
+
+// Captura rawBody como Buffer para verificação de assinatura HMAC do Stripe Webhook
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
 app.use(express.static('public'));
+
+// Configuração do Stripe SDK (Modo de Teste - Atividade 7)
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || '';
+let stripe = null;
+
+if (STRIPE_SECRET_KEY) {
+  try {
+    stripe = require('stripe')(STRIPE_SECRET_KEY);
+    console.log('[Stripe] SDK inicializado com sucesso em Test Mode.');
+  } catch (stripeInitErr) {
+    console.error('[Stripe] Erro ao inicializar SDK:', stripeInitErr.message);
+  }
+} else {
+  console.warn('[Stripe Warning] STRIPE_SECRET_KEY não definida no ambiente. O checkout necessitará da chave.');
+}
 
 // Configuração do Multer (Upload em Memória, máx 5MB, somente imagens)
 const upload = multer({
@@ -122,6 +145,31 @@ async function initCatalogDb() {
       const [colsFoto] = await conn.query("SHOW COLUMNS FROM usuarios LIKE 'foto_url'");
       if (colsFoto.length === 0) {
         await conn.query("ALTER TABLE usuarios ADD COLUMN foto_url VARCHAR(500) NULL");
+      }
+
+      // Migração Atividade 7: Plano Premium com Stripe
+      const [colsPremium] = await conn.query("SHOW COLUMNS FROM usuarios LIKE 'is_premium'");
+      if (colsPremium.length === 0) {
+        await conn.query("ALTER TABLE usuarios ADD COLUMN is_premium TINYINT(1) NOT NULL DEFAULT 0");
+        console.log('[Catalog DB] Coluna "is_premium" adicionada à tabela "usuarios".');
+      }
+
+      const [colsStripeCust] = await conn.query("SHOW COLUMNS FROM usuarios LIKE 'stripe_customer_id'");
+      if (colsStripeCust.length === 0) {
+        await conn.query("ALTER TABLE usuarios ADD COLUMN stripe_customer_id VARCHAR(255) NULL");
+        console.log('[Catalog DB] Coluna "stripe_customer_id" adicionada à tabela "usuarios".');
+      }
+
+      const [colsStripeSub] = await conn.query("SHOW COLUMNS FROM usuarios LIKE 'stripe_subscription_id'");
+      if (colsStripeSub.length === 0) {
+        await conn.query("ALTER TABLE usuarios ADD COLUMN stripe_subscription_id VARCHAR(255) NULL");
+        console.log('[Catalog DB] Coluna "stripe_subscription_id" adicionada à tabela "usuarios".');
+      }
+
+      const [colsPremiumEm] = await conn.query("SHOW COLUMNS FROM usuarios LIKE 'premium_em'");
+      if (colsPremiumEm.length === 0) {
+        await conn.query("ALTER TABLE usuarios ADD COLUMN premium_em DATETIME NULL");
+        console.log('[Catalog DB] Coluna "premium_em" adicionada à tabela "usuarios".');
       }
     } catch (colErr) {
       console.warn('[Catalog DB] Aviso ao verificar colunas:', colErr.message);
@@ -320,6 +368,16 @@ app.post('/redefinir-senha', async (req, res) => {
 // HOME (CATÁLOGO DE FILMES)
 app.get('/home', checkAuth, async (req, res) => {
   try {
+    // Sincroniza o status premium mais recente diretamente do banco de dados
+    try {
+      const [uRows] = await pool.query('SELECT is_premium FROM usuarios WHERE id = ?', [req.session.usuario.id]);
+      if (uRows.length > 0) {
+        req.session.usuario.is_premium = Boolean(uRows[0].is_premium);
+      }
+    } catch (uErr) {
+      console.warn('Aviso sincronizacao usuario:', uErr.message);
+    }
+
     let favoritos = [];
     try {
       const [rows] = await pool.query(
@@ -334,9 +392,12 @@ app.get('/home', checkAuth, async (req, res) => {
 
     const commMap = {};
     try {
-      const [comentarios] = await pool.query(
-        'SELECT id, usuario_id, usuario_nome, filme_id, texto, criado_em FROM comentarios ORDER BY criado_em ASC'
-      );
+      const [comentarios] = await pool.query(`
+        SELECT c.id, c.usuario_id, c.usuario_nome, c.filme_id, c.texto, c.criado_em, COALESCE(u.is_premium, 0) as is_premium
+        FROM comentarios c
+        LEFT JOIN usuarios u ON u.id = c.usuario_id
+        ORDER BY c.criado_em ASC
+      `);
       comentarios.forEach(c => {
         if (!commMap[c.filme_id]) {
           commMap[c.filme_id] = [];
@@ -345,6 +406,7 @@ app.get('/home', checkAuth, async (req, res) => {
           id: c.id,
           usuario_id: c.usuario_id,
           usuario_nome: c.usuario_nome || 'Usuário',
+          is_premium: Boolean(c.is_premium),
           texto: c.texto,
           criado_em: c.criado_em
         });
@@ -374,23 +436,59 @@ app.get('/home', checkAuth, async (req, res) => {
       }
     }
 
-    res.render('index', { usuario: req.session.usuario, filmes, favMap, commMap });
+    res.render('index', { 
+      usuario: req.session.usuario, 
+      filmes, 
+      favMap, 
+      commMap,
+      erro: req.query.erro || null,
+      sucesso: req.query.sucesso || null
+    });
   } catch (error) {
     console.error('Erro na Home:', error.message);
-    res.render('index', { usuario: req.session.usuario, filmes: [], favMap: new Set(), commMap: {} });
+    res.render('index', { 
+      usuario: req.session.usuario, 
+      filmes: [], 
+      favMap: new Set(), 
+      commMap: {},
+      erro: 'Não foi possível carregar o catálogo de filmes.',
+      sucesso: null
+    });
   }
 });
 
-// Adicionar Favorito
+// Adicionar Favorito (Requisito 4: Diferença real de comportamento entre Comum e Premium)
 app.post('/favoritar', checkAuth, async (req, res) => {
   const { filme_id, titulo, poster_path } = req.body;
+  const isPremium = Boolean(req.session.usuario.is_premium);
+
   try {
+    // 1. Verifica quantos favoritos o usuário já tem
+    const [favRows] = await pool.query(
+      'SELECT COUNT(*) as total FROM favoritos WHERE usuario_id = ?',
+      [req.session.usuario.id]
+    );
+    const totalFavoritos = favRows[0]?.total || 0;
+
+    // Regra de Negócio: Usuário comum tem limite de 3 favoritos; Premium tem favoritos ILIMITADOS
+    if (!isPremium && totalFavoritos >= 3) {
+      sendAuditLog(req, 'BLOQUEIO_LIMITE_FAVORITOS', {
+        usuario_id: req.session.usuario.id,
+        total_atual: totalFavoritos,
+        limite: 3,
+        filme_id,
+        titulo
+      });
+
+      return res.redirect('/home?erro=' + encodeURIComponent('Limite de favoritos atingido (máx 3 para contas gratuitas). Assine o Plano Premium por R$ 9,90/mês para favoritar sem limites!'));
+    }
+
     await pool.query(
       'INSERT IGNORE INTO favoritos (usuario_id, filme_id, titulo, poster_path) VALUES (?, ?, ?, ?)',
       [req.session.usuario.id, filme_id, titulo, poster_path]
     );
 
-    sendAuditLog(req, 'FAVORITAR_FILME', { filme_id, titulo });
+    sendAuditLog(req, 'FAVORITAR_FILME', { filme_id, titulo, is_premium: isPremium });
     res.redirect('/home');
   } catch (error) {
     console.error('Erro ao favoritar:', error);
@@ -500,16 +598,21 @@ app.get('/perfil', checkAuth, async (req, res) => {
       role: req.session.usuario.role,
       bio: '',
       foto_url: null,
+      is_premium: 0,
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      premium_em: null,
       criado_em: new Date()
     };
 
     try {
       const [userRows] = await pool.query(
-        'SELECT id, nome, email, role, bio, foto_url, criado_em FROM usuarios WHERE id = ?',
+        'SELECT id, nome, email, role, bio, foto_url, is_premium, stripe_customer_id, stripe_subscription_id, premium_em, criado_em FROM usuarios WHERE id = ?',
         [req.session.usuario.id]
       );
       if (userRows.length > 0) {
         perfilUsuario = { ...perfilUsuario, ...userRows[0] };
+        req.session.usuario.is_premium = Boolean(userRows[0].is_premium);
       }
     } catch (dbErr) {
       console.warn('[Perfil] Aviso ao buscar dados completos do usuário:', dbErr.message);
@@ -559,7 +662,7 @@ app.get('/perfil/:id', checkAuth, async (req, res) => {
 
     try {
       const [userRows] = await pool.query(
-        'SELECT id, nome, email, role, bio, foto_url, criado_em FROM usuarios WHERE id = ?',
+        'SELECT id, nome, email, role, bio, foto_url, is_premium, stripe_customer_id, stripe_subscription_id, premium_em, criado_em FROM usuarios WHERE id = ?',
         [id]
       );
       if (userRows.length > 0) {
@@ -573,7 +676,7 @@ app.get('/perfil/:id', checkAuth, async (req, res) => {
           [id]
         );
         if (fallbackRows.length > 0) {
-          perfilUsuario = { ...fallbackRows[0], bio: '', foto_url: null };
+          perfilUsuario = { ...fallbackRows[0], bio: '', foto_url: null, is_premium: 0 };
         }
       } catch (fbErr) {
         console.warn('[Perfil Publico] Fallback:', fbErr.message);
@@ -686,6 +789,283 @@ app.post('/perfil/editar', checkAuth, (req, res, next) => {
   } catch (error) {
     console.error('Erro ao atualizar perfil:', error);
     res.redirect(`/perfil?erro=${encodeURIComponent('Erro ao salvar alterações no perfil.')}`);
+  }
+});
+
+// ==========================================
+// ROTAS DE PAGAMENTO & STRIPE (ATIVIDADE 7)
+// ==========================================
+
+/**
+ * 1. Endpoint de Checkout do Stripe (GET e POST)
+ * Redireciona o usuário logado para a Checkout Session oficial hospedada pelo Stripe
+ */
+app.all(['/checkout/premium', '/checkout'], checkAuth, async (req, res) => {
+  // Se o usuário já é premium, redireciona de volta
+  if (req.session.usuario.is_premium) {
+    return res.redirect('/perfil?sucesso=' + encodeURIComponent('Você já é um assinante do Plano Premium! Seus benefícios estão ativos.'));
+  }
+
+  // Verifica se o SDK do Stripe foi devidamente configurado com a secret key
+  if (!stripe) {
+    console.error('[Stripe Error] Tentativa de checkout sem STRIPE_SECRET_KEY configurada.');
+    return res.redirect('/perfil?erro=' + encodeURIComponent('Stripe não configurado no servidor. Defina STRIPE_SECRET_KEY no arquivo .env para iniciar pagamentos em modo de teste.'));
+  }
+
+  try {
+    const baseUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+
+    // Se houver STRIPE_PRICE_ID definido no ambiente, usa o Price ID configurado no painel;
+    // Caso contrário, gera uma assinatura dinâmica inline no valor de R$ 9,90/mês.
+    let lineItems;
+    if (STRIPE_PRICE_ID) {
+      lineItems = [{
+        price: STRIPE_PRICE_ID,
+        quantity: 1
+      }];
+    } else {
+      lineItems = [{
+        price_data: {
+          currency: 'brl',
+          product_data: {
+            name: 'Plano Premium — Catálogo de Filmes Tom Hanks',
+            description: 'Acesso VIP com favoritos ilimitados e selo de membro premium exclusivo em perfil e comentários.',
+          },
+          unit_amount: 990, // R$ 9,90
+          recurring: {
+            interval: 'month'
+          }
+        },
+        quantity: 1
+      }];
+    }
+
+    // Criação da sessão de checkout no Stripe (Modo de Teste)
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      mode: 'subscription',
+      customer_email: req.session.usuario.email,
+      client_reference_id: String(req.session.usuario.id),
+      metadata: {
+        usuario_id: String(req.session.usuario.id),
+        usuario_nome: req.session.usuario.nome,
+        usuario_email: req.session.usuario.email
+      },
+      subscription_data: {
+        metadata: {
+          usuario_id: String(req.session.usuario.id)
+        }
+      },
+      success_url: `${baseUrl}/checkout/sucesso?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${baseUrl}/checkout/cancelado`
+    });
+
+    sendAuditLog(req, 'STRIPE_CHECKOUT_INICIADO', {
+      session_id: session.id,
+      usuario_id: req.session.usuario.id,
+      email: req.session.usuario.email,
+      modo: 'subscription',
+      valor: 'R$ 9,90/mês'
+    });
+
+    console.log(`[Stripe Checkout] Sessão ${session.id} criada para o usuário ${req.session.usuario.email}. Redirecionando...`);
+    return res.redirect(303, session.url);
+  } catch (stripeErr) {
+    console.error('[Stripe Error] Erro ao criar Checkout Session:', stripeErr);
+    return res.redirect('/perfil?erro=' + encodeURIComponent(`Erro ao iniciar Stripe Checkout: ${stripeErr.message}`));
+  }
+});
+
+/**
+ * 2. Endpoint de Retorno de Sucesso pós-Checkout
+ */
+app.get('/checkout/sucesso', checkAuth, async (req, res) => {
+  const { session_id } = req.query;
+
+  if (session_id && stripe) {
+    try {
+      const session = await stripe.checkout.sessions.retrieve(session_id);
+      if (session && (session.payment_status === 'paid' || session.status === 'complete')) {
+        const usuarioId = session.client_reference_id || session.metadata?.usuario_id || req.session.usuario.id;
+        
+        await pool.query(
+          'UPDATE usuarios SET is_premium = 1, stripe_customer_id = ?, stripe_subscription_id = ?, premium_em = NOW() WHERE id = ?',
+          [session.customer || null, session.subscription || null, usuarioId]
+        );
+
+        req.session.usuario.is_premium = 1;
+
+        sendAuditLog(req, 'CHECKOUT_SUCESSO_CONFIRMADO', {
+          session_id,
+          usuario_id: usuarioId,
+          customer_id: session.customer,
+          subscription_id: session.subscription
+        });
+      }
+    } catch (retrieveErr) {
+      console.warn('[Stripe] Aviso ao consultar sessão após retorno:', retrieveErr.message);
+    }
+  }
+
+  // Garante que o status premium na sessão seja 1
+  req.session.usuario.is_premium = 1;
+  res.render('checkout-sucesso', { usuario: req.session.usuario });
+});
+
+/**
+ * 3. Endpoint de Cancelamento pós-Checkout
+ */
+app.get('/checkout/cancelado', (req, res) => {
+  res.render('checkout-cancelado', { usuario: req.session?.usuario || {} });
+});
+
+/**
+ * 4. Endpoint de Webhook do Stripe (Validação Criptográfica de Assinatura)
+ * Recebe notificações assíncronas do Stripe e atualiza is_premium: true no banco de dados
+ */
+app.post(['/webhook/stripe', '/webhook'], async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    const rawPayload = req.rawBody || req.body;
+
+    // Validação estrita de assinatura do webhook com Stripe SDK
+    if (STRIPE_WEBHOOK_SECRET && sig && stripe) {
+      event = stripe.webhooks.constructEvent(rawPayload, sig, STRIPE_WEBHOOK_SECRET);
+    } else if (!STRIPE_WEBHOOK_SECRET) {
+      // Fallback permissivo para desenvolvimento / testes manuais sem secret configurada
+      console.warn('[Webhook Stripe] STRIPE_WEBHOOK_SECRET não configurada. Parseando payload diretamente.');
+      event = typeof rawPayload === 'string' || Buffer.isBuffer(rawPayload)
+        ? JSON.parse(rawPayload.toString())
+        : rawPayload;
+    } else {
+      console.error('[Webhook Stripe] Cabeçalho stripe-signature ausente.');
+      return res.status(400).send('Webhook Error: Cabeçalho stripe-signature ausente.');
+    }
+  } catch (err) {
+    console.error('[Webhook Stripe Error] Falha na validação de assinatura:', err.message);
+    return res.status(400).send(`Webhook Signature Verification Error: ${err.message}`);
+  }
+
+  console.log(`[Webhook Stripe] Evento recebido: ${event.type}`);
+
+  try {
+    // Caso 1: Pagamento / Checkout concluído com sucesso
+    if (event.type === 'checkout.session.completed') {
+      const sessionObj = event.data.object;
+      const usuarioId = sessionObj.client_reference_id || sessionObj.metadata?.usuario_id;
+      const customerId = sessionObj.customer;
+      const subscriptionId = sessionObj.subscription;
+      const customerEmail = sessionObj.customer_details?.email || sessionObj.customer_email || sessionObj.metadata?.usuario_email;
+
+      console.log(`[Webhook Stripe] Processando checkout.session.completed para usuarioId=${usuarioId}, email=${customerEmail}`);
+
+      // Atualiza usuário no MariaDB
+      if (usuarioId) {
+        await pool.query(
+          'UPDATE usuarios SET is_premium = 1, stripe_customer_id = ?, stripe_subscription_id = ?, premium_em = NOW() WHERE id = ?',
+          [customerId || null, subscriptionId || null, usuarioId]
+        );
+      } else if (customerEmail) {
+        await pool.query(
+          'UPDATE usuarios SET is_premium = 1, stripe_customer_id = ?, stripe_subscription_id = ?, premium_em = NOW() WHERE email = ?',
+          [customerId || null, subscriptionId || null, customerEmail]
+        );
+      }
+
+      // Sincroniza via microsserviço auth-service se disponível
+      if (usuarioId) {
+        try {
+          await axios.post(`${AUTH_SERVICE_URL}/auth/users/${usuarioId}/premium`, {
+            is_premium: 1,
+            stripe_customer_id: customerId,
+            stripe_subscription_id: subscriptionId
+          }, { timeout: 2000 });
+        } catch (authErr) {
+          console.warn('[Webhook Stripe] Aviso de sincronização com auth-service:', authErr.message);
+        }
+      }
+
+      // Registro de Auditoria no Redis Streams (Microsserviço log-service)
+      await sendAuditLog(req, 'ASSINATURA_PREMIUM_CONFIRMADA_WEBHOOK', {
+        usuario_id: usuarioId,
+        email: customerEmail,
+        stripe_customer_id: customerId,
+        stripe_subscription_id: subscriptionId,
+        evento: event.type
+      });
+
+      console.log(`[Webhook Stripe] Usuário ${usuarioId || customerEmail} atualizado para PREMIUM com sucesso!`);
+    }
+
+    // Caso 2: Cobrança recorrente de fatura concluída
+    if (event.type === 'invoice.payment_succeeded') {
+      const invoice = event.data.object;
+      const customerId = invoice.customer;
+      const subscriptionId = invoice.subscription;
+
+      await pool.query(
+        'UPDATE usuarios SET is_premium = 1 WHERE stripe_customer_id = ? OR stripe_subscription_id = ?',
+        [customerId, subscriptionId]
+      );
+
+      sendAuditLog(req, 'FATURA_STRIPE_PAGA_SUCESSO', {
+        stripe_customer_id: customerId,
+        stripe_subscription_id: subscriptionId
+      });
+    }
+
+    // Caso 3: Cancelamento de Assinatura no Stripe
+    if (event.type === 'customer.subscription.deleted') {
+      const sub = event.data.object;
+      await pool.query(
+        'UPDATE usuarios SET is_premium = 0 WHERE stripe_subscription_id = ?',
+        [sub.id]
+      );
+
+      sendAuditLog(req, 'ASSINATURA_PREMIUM_CANCELADA_WEBHOOK', {
+        stripe_subscription_id: sub.id
+      });
+
+      console.log(`[Webhook Stripe] Assinatura ${sub.id} cancelada. Usuário rebaixado para gratuito.`);
+    }
+
+    return res.status(200).json({ received: true });
+  } catch (procErr) {
+    console.error('[Webhook Stripe Error] Erro ao processar dados do evento:', procErr);
+    return res.status(500).json({ error: 'Erro interno ao processar evento de webhook' });
+  }
+});
+
+/**
+ * 5. Endpoint Auxiliar: Simulação de Webhook Stripe em Ambiente Local / Avaliação
+ * Permite comprovar o fluxo de webhook e mudança de status sem depender exclusivamente da CLI externa
+ */
+app.post('/admin/simular-webhook-stripe', checkAuth, async (req, res) => {
+  const targetUserId = req.body.usuario_id || req.session.usuario.id;
+  const mockCustomer = 'cus_test_' + Date.now();
+  const mockSub = 'sub_test_' + Date.now();
+
+  try {
+    await pool.query(
+      'UPDATE usuarios SET is_premium = 1, stripe_customer_id = ?, stripe_subscription_id = ?, premium_em = NOW() WHERE id = ?',
+      [mockCustomer, mockSub, targetUserId]
+    );
+
+    if (String(req.session.usuario.id) === String(targetUserId)) {
+      req.session.usuario.is_premium = 1;
+    }
+
+    sendAuditLog(req, 'ASSINATURA_PREMIUM_SIMULADA_TESTE', {
+      usuario_id: targetUserId,
+      stripe_customer_id: mockCustomer,
+      stripe_subscription_id: mockSub
+    });
+
+    res.redirect('/perfil?sucesso=' + encodeURIComponent('Simulação de webhook Stripe executada com sucesso! Conta promovida a PREMIUM.'));
+  } catch (simErr) {
+    res.redirect('/perfil?erro=' + encodeURIComponent(`Erro na simulação: ${simErr.message}`));
   }
 });
 

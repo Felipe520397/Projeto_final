@@ -48,8 +48,33 @@ async function initDatabase() {
         await connection.query("ALTER TABLE usuarios ADD COLUMN foto_url VARCHAR(500) NULL");
         console.log('[Auth-Service DB] Coluna "foto_url" adicionada à tabela "usuarios".');
       }
+
+      // Migração Atividade 7: Plano Premium com Stripe
+      const [colsPremium] = await connection.query("SHOW COLUMNS FROM usuarios LIKE 'is_premium'");
+      if (colsPremium.length === 0) {
+        await connection.query("ALTER TABLE usuarios ADD COLUMN is_premium TINYINT(1) NOT NULL DEFAULT 0");
+        console.log('[Auth-Service DB] Coluna "is_premium" adicionada à tabela "usuarios".');
+      }
+
+      const [colsStripeCust] = await connection.query("SHOW COLUMNS FROM usuarios LIKE 'stripe_customer_id'");
+      if (colsStripeCust.length === 0) {
+        await connection.query("ALTER TABLE usuarios ADD COLUMN stripe_customer_id VARCHAR(255) NULL");
+        console.log('[Auth-Service DB] Coluna "stripe_customer_id" adicionada à tabela "usuarios".');
+      }
+
+      const [colsStripeSub] = await connection.query("SHOW COLUMNS FROM usuarios LIKE 'stripe_subscription_id'");
+      if (colsStripeSub.length === 0) {
+        await connection.query("ALTER TABLE usuarios ADD COLUMN stripe_subscription_id VARCHAR(255) NULL");
+        console.log('[Auth-Service DB] Coluna "stripe_subscription_id" adicionada à tabela "usuarios".');
+      }
+
+      const [colsPremiumEm] = await connection.query("SHOW COLUMNS FROM usuarios LIKE 'premium_em'");
+      if (colsPremiumEm.length === 0) {
+        await connection.query("ALTER TABLE usuarios ADD COLUMN premium_em DATETIME NULL");
+        console.log('[Auth-Service DB] Coluna "premium_em" adicionada à tabela "usuarios".');
+      }
     } catch (colErr) {
-      console.warn('[Auth-Service DB] Aviso ao verificar colunas de perfil:', colErr.message);
+      console.warn('[Auth-Service DB] Aviso ao verificar colunas de perfil e stripe:', colErr.message);
     }
 
     // 3. Criação da tabela reset_tokens para recuperação de senha

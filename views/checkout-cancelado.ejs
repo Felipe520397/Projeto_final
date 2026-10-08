@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Checkout Cancelado — Catálogo</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #141414;
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .card-cancelado {
+      background: #1f1f1f;
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 480px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+    }
+    .cancel-icon {
+      font-size: 3rem;
+      margin-bottom: 15px;
+    }
+    h1 {
+      color: #ffaa00;
+      margin: 0 0 10px 0;
+      font-size: 1.6rem;
+    }
+    p {
+      color: #ccc;
+      line-height: 1.6;
+      font-size: 0.95rem;
+      margin: 15px 0 25px;
+    }
+    .btn-tentar {
+      display: inline-block;
+      background: #e50914;
+      color: #fff;
+      text-decoration: none;
+      font-weight: bold;
+      padding: 12px 24px;
+      border-radius: 6px;
+      margin: 5px;
+      transition: background 0.2s;
+    }
+    .btn-tentar:hover {
+      background: #b80710;
+    }
+    .btn-voltar {
+      display: inline-block;
+      background: #333;
+      color: #ccc;
+      text-decoration: none;
+      font-weight: bold;
+      padding: 12px 24px;
+      border-radius: 6px;
+      margin: 5px;
+      transition: background 0.2s;
+    }
+    .btn-voltar:hover {
+      background: #444;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="card-cancelado">
+    <div class="cancel-icon">↩️</div>
+    <h1>Checkout Cancelado</h1>
+    <p>A assinatura do Plano Premium não foi concluída e nenhuma cobrança foi realizada no Stripe. Você pode voltar ao catálogo ou tentar novamente quando quiser.</p>
+
+    <a href="/checkout/premium" class="btn-tentar">Tentar Assinar Novamente</a>
+    <a href="/home" class="btn-voltar">Voltar ao Catálogo</a>
+  </div>
+</body>
+</html>
+

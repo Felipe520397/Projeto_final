@@ -59,6 +59,10 @@
       <div class="stat-num"><%= usuarios.length %></div>
       <div class="stat-label">👥 Usuários Cadastrados</div>
     </div>
+    <div class="stat-card" style="border-left-color: #ffd700;">
+      <div class="stat-num" style="color: #ffd700;"><%= usuarios.filter(u => u.is_premium).length %></div>
+      <div class="stat-label">⭐ Assinantes Premium (Stripe)</div>
+    </div>
     <div class="stat-card" style="border-left-color: #007bff;">
       <div class="stat-num"><%= comentarios.length %></div>
       <div class="stat-label">💬 Comentários no Sistema</div>
@@ -71,10 +75,10 @@
 
   <!-- SEÇÃO 1: USUÁRIOS CADASTRADOS (RBAC) -->
   <div class="card">
-    <h2>👥 Usuários Cadastrados no Sistema (Controle de Acesso por Papel)</h2>
+    <h2>👥 Usuários Cadastrados no Sistema (Controle de Acesso por Papel & Assinaturas)</h2>
     
     <div class="info-box">
-      <strong>Controle de Acesso por Papel (RBAC):</strong> Como Administrador, você pode visualizar todos os usuários cadastrados e alterar os papéis de acesso entre <code>usuario</code> e <code>admin</code>.
+      <strong>Controle de Acesso & Stripe:</strong> Como Administrador, você pode gerenciar os papéis de acesso (<code>usuario</code> e <code>admin</code>) e acompanhar o status de assinatura do <strong>Plano Premium</strong> integrado ao Stripe.
     </div>
 
     <table>
@@ -84,13 +88,14 @@
           <th>Nome</th>
           <th>E-mail</th>
           <th>Papel Atual</th>
+          <th>Plano / Stripe</th>
           <th>Data de Cadastro</th>
           <th>Ações de Papel (Role)</th>
         </tr>
       </thead>
       <tbody>
         <% if (usuarios.length === 0) { %>
-          <tr><td colspan="6" style="text-align: center; color: #888;">Nenhum usuário cadastrado.</td></tr>
+          <tr><td colspan="7" style="text-align: center; color: #888;">Nenhum usuário cadastrado.</td></tr>
         <% } %>
         <% usuarios.forEach(u => { %>
           <tr>
@@ -107,6 +112,13 @@
                 <span class="role-badge badge-admin">ADMIN</span>
               <% } else { %>
                 <span class="role-badge badge-user">USUÁRIO</span>
+              <% } %>
+            </td>
+            <td>
+              <% if (u.is_premium) { %>
+                <span style="background: linear-gradient(135deg, #ffd700, #ff8c00); color: #111; font-weight: bold; padding: 2px 8px; border-radius: 10px; font-size: 0.75em; display: inline-block;">⭐ PREMIUM</span>
+              <% } else { %>
+                <span style="color: #888; font-size: 0.8em; border: 1px solid #444; padding: 2px 6px; border-radius: 4px;">Gratuito</span>
               <% } %>
             </td>
             <td><%= new Date(u.criado_em).toLocaleDateString('pt-BR') %></td>

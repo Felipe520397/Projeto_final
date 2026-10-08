@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Assinatura Confirmada — Plano Premium</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #141414;
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .card-sucesso {
+      background: #1f1f1f;
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 520px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+      animation: fadeIn 0.5s ease-in-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .badge-icon {
+      width: 90px;
+      height: 90px;
+      margin: 0 auto 20px;
+      background: linear-gradient(135deg, #ffd700, #ff8c00);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 3rem;
+      box-shadow: 0 0 25px rgba(255, 215, 0, 0.5);
+    }
+    h1 {
+      color: #ffd700;
+      margin: 0 0 10px 0;
+      font-size: 1.8rem;
+    }
+    p {
+      color: #ccc;
+      line-height: 1.6;
+      font-size: 1rem;
+      margin: 10px 0;
+    }
+    .beneficios-list {
+      background: #181818;
+      border: 1px solid #2e2e2e;
+      border-radius: 8px;
+      padding: 15px 20px;
+      margin: 25px 0;
+      text-align: left;
+    }
+    .beneficios-list div {
+      padding: 8px 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.95rem;
+      color: #eee;
+    }
+    .beneficios-list div:not(:last-child) {
+      border-bottom: 1px solid #272727;
+    }
+    .btn-continuar {
+      display: inline-block;
+      background: linear-gradient(135deg, #e50914, #b80710);
+      color: #fff;
+      text-decoration: none;
+      font-weight: bold;
+      padding: 14px 30px;
+      border-radius: 6px;
+      transition: all 0.2s;
+      font-size: 1rem;
+      box-shadow: 0 4px 12px rgba(229, 9, 20, 0.4);
+    }
+    .btn-continuar:hover {
+      background: linear-gradient(135deg, #ff1a26, #cc0812);
+      transform: scale(1.02);
+    }
+    .stripe-note {
+      margin-top: 20px;
+      font-size: 0.8rem;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <div class="card-sucesso">
+    <div class="badge-icon">⭐</div>
+    <h1>Parabéns! Você agora é Premium!</h1>
+    <p>O seu pagamento de teste foi processado com sucesso pelo <strong>Stripe</strong>. A confirmação foi recebida via webhook e sua conta já possui todos os privilégios liberados.</p>
+
+    <div class="beneficios-list">
+      <div><span>⭐</span> <strong>Favoritos Ilimitados:</strong> adicione quantos filmes desejar ao seu perfil.</div>
+      <div><span>🎖️</span> <strong>Selo VIP:</strong> destaque exclusivo no seu perfil e comentários.</div>
+      <div><span>🔒</span> <strong>Pagamento Seguro:</strong> dados protegidos diretamente na infraestrutura Stripe (PCI-DSS).</div>
+    </div>
+
+    <a href="/home" class="btn-continuar">Explorar o Catálogo com Favoritos Ilimitados →</a>
+
+    <div class="stripe-note">
+      Transação simulada no Stripe Test Mode. Nenhuma cobrança real foi realizada.
+    </div>
+  </div>
+</body>
+</html>
+

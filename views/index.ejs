@@ -6,25 +6,121 @@
   <title>Catálogo Tom Hanks</title>
   <style>
     body { font-family: 'Segoe UI', Arial, sans-serif; margin: 20px; background: #141414; color: #fff; }
-    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 15px; }
-    .header-user { display: flex; align-items: center; gap: 10px; }
+    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 15px; flex-wrap: wrap; gap: 10px; }
+    .header-user { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .role-badge { font-size: 0.75em; padding: 3px 8px; border-radius: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }
     .badge-admin { background: #e50914; color: white; }
     .badge-user { background: #007bff; color: white; }
+    .badge-premium { background: linear-gradient(135deg, #ffd700, #ff8c00); color: #111; font-weight: bold; padding: 3px 10px; border-radius: 12px; font-size: 0.75em; letter-spacing: 0.5px; box-shadow: 0 0 10px rgba(255, 215, 0, 0.4); text-transform: uppercase; }
+    
+    .btn-upgrade-nav {
+      background: linear-gradient(135deg, #ffd700, #ff9900);
+      color: #111;
+      font-weight: bold;
+      text-decoration: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 0.85em;
+      box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+      transition: transform 0.2s, box-shadow 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .btn-upgrade-nav:hover {
+      transform: scale(1.05);
+      box-shadow: 0 0 15px rgba(255, 215, 0, 0.6);
+    }
     .btn-admin-nav { background: #333; border: 1px solid #e50914; color: #fff; padding: 5px 10px; border-radius: 4px; font-size: 0.85em; font-weight: bold; text-decoration: none; transition: background 0.2s; }
     .btn-admin-nav:hover { background: #e50914; }
+
+    /* Barra de Status do Plano e Favoritos */
+    .status-bar {
+      margin-top: 15px;
+      padding: 12px 18px;
+      background: #1c1c1c;
+      border-radius: 8px;
+      border: 1px solid #333;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      font-size: 0.9em;
+    }
+    .status-bar.premium-active {
+      border-color: #ffd700;
+      background: linear-gradient(90deg, rgba(255, 215, 0, 0.08), rgba(20, 20, 20, 0.9));
+    }
+    .fav-counter {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .fav-counter strong {
+      color: #fff;
+    }
+    .fav-counter .highlight-gold {
+      color: #ffd700;
+    }
+
+    /* Alertas */
+    .alerta-box {
+      margin-top: 15px;
+      padding: 14px 18px;
+      border-radius: 6px;
+      font-size: 0.95em;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      animation: fadeIn 0.3s;
+    }
+    .alerta-erro {
+      background: rgba(229, 9, 20, 0.15);
+      border: 1px solid #e50914;
+      color: #ff9999;
+    }
+    .alerta-sucesso {
+      background: rgba(70, 211, 105, 0.15);
+      border: 1px solid #46d369;
+      color: #46d369;
+    }
+    .btn-alerta-cta {
+      background: #ffd700;
+      color: #111;
+      padding: 6px 14px;
+      border-radius: 4px;
+      text-decoration: none;
+      font-weight: bold;
+      font-size: 0.85em;
+      margin-left: 15px;
+      white-space: nowrap;
+    }
+
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; margin-top: 20px; }
     .card { background: #222; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; justify-content: space-between; }
     .card img { width: 100%; border-radius: 4px; }
     .card h3 { font-size: 1.1em; margin: 10px 0 5px 0; }
     .card p { font-size: 0.85em; color: #ccc; max-height: 100px; overflow-y: auto; }
-    .btn-fav { background: #e50914; color: white; border: none; padding: 8px; width: 100%; border-radius: 4px; cursor: pointer; margin-bottom: 8px; }
+    .btn-fav { background: #e50914; color: white; border: none; padding: 8px; width: 100%; border-radius: 4px; cursor: pointer; margin-bottom: 8px; font-weight: bold; }
+    .btn-fav:hover { background: #ff1a26; }
     .fav-active { background: #46d369; cursor: default; }
+    .fav-active:hover { background: #46d369; }
     .comentarios { background: #111; padding: 8px; border-radius: 4px; margin-top: 8px; font-size: 0.8em; }
     .comentarios ul { list-style: none; padding-left: 0; margin: 6px 0; }
     .comm-item { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #222; gap: 5px; }
     .comm-text { word-break: break-word; }
     .comm-author { color: #007bff; font-weight: bold; }
+    .comm-author-premium { color: #ffd700; font-weight: bold; }
+    .badge-mini-gold {
+      background: #ffd700;
+      color: #000;
+      font-size: 0.7em;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-weight: 900;
+      margin-left: 3px;
+    }
     .btn-del-comm { background: none; border: none; color: #aaa; cursor: pointer; padding: 2px 4px; font-size: 0.9em; }
     .btn-del-comm:hover { color: #ff4d4d; }
     .btn-del-admin { background: rgba(229, 9, 20, 0.2); border: 1px solid #e50914; color: #ff8080; border-radius: 3px; cursor: pointer; font-size: 0.7em; padding: 2px 5px; font-weight: bold; }
@@ -40,17 +136,62 @@
     <h1>Catálogo de Filmes — Tom Hanks</h1>
     <div class="header-user">
       <span>Olá, <a href="/perfil" style="color: #fff; text-decoration: none;"><strong><%= usuario.nome %></strong></a></span>
+
+      <% if (usuario.is_premium) { %>
+        <span class="badge-premium">⭐ PREMIUM</span>
+      <% } else { %>
+        <a href="/checkout/premium" class="btn-upgrade-nav">⭐ Assinar Premium (R$ 9,90)</a>
+      <% } %>
+
       <% if (usuario.role === 'admin') { %>
         <span class="role-badge badge-admin">ADMIN</span>
         <a href="/admin/usuarios" class="btn-admin-nav">🛡️ Usuários</a>
         <a href="/admin/logs" class="btn-admin-nav" style="border-color: #007bff;">📜 Logs</a>
-      <% } else { %>
+      <% } else if (!usuario.is_premium) { %>
         <span class="role-badge badge-user">USUÁRIO</span>
       <% } %>
+
       <a href="/perfil" class="btn-admin-nav" style="border-color: #28a745;">👤 Perfil</a>
       | <a href="/logout" class="logout">Sair</a>
     </div>
   </header>
+
+  <!-- Barra de Informação de Plano e Benefício de Favoritos -->
+  <div class="status-bar <%= usuario.is_premium ? 'premium-active' : '' %>">
+    <div class="fav-counter">
+      <% if (usuario.is_premium) { %>
+        <span class="highlight-gold">⭐ <strong>Plano Premium Ativo:</strong> Você possui <strong>favoritos ilimitados</strong> (<%= favMap.size %> filmes favoritados)!</span>
+      <% } else { %>
+        <span>
+          📌 <strong>Plano Gratuito:</strong> Você usou <strong><%= favMap.size %> de 3</strong> favoritos permitidos.
+        </span>
+      <% } %>
+    </div>
+    <div>
+      <% if (usuario.is_premium) { %>
+        <span style="color: #46d369; font-weight: bold;">✔ Benefícios VIP Habilitados</span>
+      <% } else { %>
+        <a href="/checkout/premium" style="color: #ffd700; text-decoration: none; font-weight: bold;">
+          Deseja favoritos ilimitados? Assine o Premium por R$ 9,90/mês →
+        </a>
+      <% } %>
+    </div>
+  </div>
+
+  <!-- Alertas de Sucesso ou Erro de Negócio -->
+  <% if (locals.erro) { %>
+    <div class="alerta-box alerta-erro">
+      <div>⚠️ <%= erro %></div>
+      <% if (!usuario.is_premium) { %>
+        <a href="/checkout/premium" class="btn-alerta-cta">⭐ Fazer Upgrade Agora</a>
+      <% } %>
+    </div>
+  <% } %>
+  <% if (locals.sucesso) { %>
+    <div class="alerta-box alerta-sucesso">
+      <div>✅ <%= sucesso %></div>
+    </div>
+  <% } %>
 
   <div class="grid">
     <% filmes.forEach(filme => { %>
@@ -67,7 +208,10 @@
 
         <div>
           <% if (favMap.has(filme.id)) { %>
-            <button class="btn-fav fav-active" disabled>★ Favoritado</button>
+            <form action="/desfavoritar" method="POST" style="margin-bottom: 8px;">
+              <input type="hidden" name="filme_id" value="<%= filme.id %>">
+              <button type="submit" class="btn-fav fav-active" title="Clique para remover dos favoritos">★ Favoritado (Remover)</button>
+            </form>
           <% } else { %>
             <form action="/favoritar" method="POST">
               <input type="hidden" name="filme_id" value="<%= filme.id %>">
@@ -84,7 +228,11 @@
                 <% commMap[filme.id].forEach(c => { %>
                   <li class="comm-item">
                     <span class="comm-text">
-                      <span class="comm-author"><%= c.usuario_nome %></span>: <%= c.texto %>
+                      <% if (c.is_premium) { %>
+                        <span class="comm-author-premium">⭐ <%= c.usuario_nome %><span class="badge-mini-gold">VIP</span></span>: <%= c.texto %>
+                      <% } else { %>
+                        <span class="comm-author"><%= c.usuario_nome %></span>: <%= c.texto %>
+                      <% } %>
                     </span>
 
                     <% if (c.usuario_id === usuario.id) { %>

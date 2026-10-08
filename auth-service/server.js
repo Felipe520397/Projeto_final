@@ -159,7 +159,11 @@ app.post('/auth/login', async (req, res) => {
       id: usuario.id,
       nome: usuario.nome,
       email: usuario.email,
-      role: usuario.role || 'usuario'
+      role: usuario.role || 'usuario',
+      is_premium: usuario.is_premium ? 1 : 0,
+      stripe_customer_id: usuario.stripe_customer_id || null,
+      stripe_subscription_id: usuario.stripe_subscription_id || null,
+      premium_em: usuario.premium_em || null
     };
 
     // Log de auditoria
@@ -168,7 +172,7 @@ app.post('/auth/login', async (req, res) => {
       usuario_nome: usuario.nome,
       usuario_email: usuario.email,
       acao: 'LOGIN_SUCESSO',
-      detalhes: { role: userRetorno.role },
+      detalhes: { role: userRetorno.role, is_premium: userRetorno.is_premium },
       ip: clientIp
     });
 
@@ -184,14 +188,14 @@ app.post('/auth/login', async (req, res) => {
 });
 
 /**
- * ROTA: Consulta de usuário / papel (role)
+ * ROTA: Consulta de usuário / papel (role) e status premium
  * GET /auth/user-role/:id
  */
 app.get('/auth/user-role/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    const [rows] = await pool.query('SELECT id, nome, email, role FROM usuarios WHERE id = ?', [id]);
+    const [rows] = await pool.query('SELECT id, nome, email, role, is_premium, stripe_customer_id, stripe_subscription_id, premium_em FROM usuarios WHERE id = ?', [id]);
     if (rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Usuário não encontrado.' });
     }
@@ -199,7 +203,8 @@ app.get('/auth/user-role/:id', async (req, res) => {
     return res.json({
       success: true,
       user: rows[0],
-      role: rows[0].role || 'usuario'
+      role: rows[0].role || 'usuario',
+      is_premium: rows[0].is_premium ? 1 : 0
     });
   } catch (error) {
     console.error('[Auth-Service] Erro ao consultar role:', error);
@@ -213,11 +218,48 @@ app.get('/auth/user-role/:id', async (req, res) => {
  */
 app.get('/auth/users', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT id, nome, email, role, criado_em FROM usuarios ORDER BY id ASC');
+    const [rows] = await pool.query('SELECT id, nome, email, role, is_premium, stripe_customer_id, stripe_subscription_id, criado_em, premium_em FROM usuarios ORDER BY id ASC');
     return res.json({ success: true, users: rows });
   } catch (error) {
     console.error('[Auth-Service] Erro ao listar usuários:', error);
     return res.status(500).json({ success: false, error: 'Erro ao listar usuários.' });
+  }
+});
+
+/**
+ * ROTA: Atualizar status Premium do usuário (Uso interno pelo Webhook do Stripe)
+ * POST /auth/users/:id/premium
+ * Body: { is_premium, stripe_customer_id, stripe_subscription_id }
+ */
+app.post('/auth/users/:id/premium', async (req, res) => {
+  const { id } = req.params;
+  const { is_premium, stripe_customer_id, stripe_subscription_id } = req.body;
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+
+  try {
+    const statusVal = is_premium ? 1 : 0;
+    const [result] = await pool.query(
+      'UPDATE usuarios SET is_premium = ?, stripe_customer_id = ?, stripe_subscription_id = ?, premium_em = NOW() WHERE id = ?',
+      [statusVal, stripe_customer_id || null, stripe_subscription_id || null, id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, error: 'Usuário não encontrado.' });
+    }
+
+    logAuditEvent({
+      usuario_id: id,
+      usuario_nome: 'Stripe Webhook',
+      acao: statusVal === 1 ? 'PLANO_PREMIUM_ATIVADO' : 'PLANO_PREMIUM_REVOGADO',
+      detalhes: { stripe_customer_id, stripe_subscription_id, is_premium: statusVal },
+      ip: clientIp
+    });
+
+    console.log(`[Auth-Service] Status Premium do usuário ID ${id} atualizado para ${statusVal}.`);
+    return res.json({ success: true, message: `Status Premium atualizado para ${statusVal}.` });
+  } catch (error) {
+    console.error('[Auth-Service] Erro ao atualizar status premium:', error);
+    return res.status(500).json({ success: false, error: 'Erro interno ao atualizar status premium.' });
   }
 });
 
