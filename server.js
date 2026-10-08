@@ -90,10 +90,10 @@ async function sendAuditLog(req, acao, detalhes = {}) {
 
 // Pool de conexão para Favoritos e Comentários do Catálogo
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
+  host: process.env.DB_HOST || 'mariadb',
   port: parseInt(process.env.DB_PORT || '3306', 10),
   user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
+  password: process.env.DB_PASSWORD || 'rootpassword',
   database: process.env.DB_NAME || 'filmes_db',
   waitForConnections: true,
   connectionLimit: 10,
