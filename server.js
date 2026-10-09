@@ -132,6 +132,12 @@ async function initCatalogDb() {
 
     // Garante que as colunas usuario_nome, bio e foto_url existam
     try {
+      try {
+        await conn.query("ALTER TABLE favoritos MODIFY COLUMN poster_path TEXT NULL");
+      } catch (favColErr) {
+        // ignora se já for compatível
+      }
+
       const [colsNome] = await conn.query("SHOW COLUMNS FROM comentarios LIKE 'usuario_nome'");
       if (colsNome.length === 0) {
         await conn.query("ALTER TABLE comentarios ADD COLUMN usuario_nome VARCHAR(255) DEFAULT 'Usuário'");
@@ -388,7 +394,7 @@ app.get('/home', checkAuth, async (req, res) => {
     } catch (dbErr) {
       console.log('Aviso favoritos:', dbErr.message);
     }
-    const favMap = new Set(favoritos.map(f => f.filme_id));
+    const favMap = new Set(favoritos.map(f => String(f.filme_id)));
 
     const commMap = {};
     try {
@@ -399,10 +405,11 @@ app.get('/home', checkAuth, async (req, res) => {
         ORDER BY c.criado_em ASC
       `);
       comentarios.forEach(c => {
-        if (!commMap[c.filme_id]) {
-          commMap[c.filme_id] = [];
+        const key = String(c.filme_id);
+        if (!commMap[key]) {
+          commMap[key] = [];
         }
-        commMap[c.filme_id].push({
+        commMap[key].push({
           id: c.id,
           usuario_id: c.usuario_id,
           usuario_nome: c.usuario_nome || 'Usuário',
@@ -460,10 +467,27 @@ app.get('/home', checkAuth, async (req, res) => {
 // Adicionar Favorito (Requisito 4: Diferença real de comportamento entre Comum e Premium)
 app.post('/favoritar', checkAuth, async (req, res) => {
   const { filme_id, titulo, poster_path } = req.body;
-  const isPremium = Boolean(req.session.usuario.is_premium);
+  const filmeIdNum = parseInt(filme_id, 10);
+
+  if (!filmeIdNum || isNaN(filmeIdNum)) {
+    console.error('[Favoritar Error] filme_id inválido:', filme_id);
+    return res.redirect('/home');
+  }
 
   try {
-    // 1. Verifica quantos favoritos o usuário já tem
+    // 1. Sincroniza status premium diretamente do banco em tempo real
+    let isPremium = Boolean(req.session.usuario.is_premium);
+    try {
+      const [uRows] = await pool.query('SELECT is_premium FROM usuarios WHERE id = ?', [req.session.usuario.id]);
+      if (uRows.length > 0) {
+        isPremium = Boolean(uRows[0].is_premium);
+        req.session.usuario.is_premium = isPremium;
+      }
+    } catch (uErr) {
+      console.warn('[Favoritar] Aviso sincronização:', uErr.message);
+    }
+
+    // 2. Verifica quantos favoritos o usuário já tem
     const [favRows] = await pool.query(
       'SELECT COUNT(*) as total FROM favoritos WHERE usuario_id = ?',
       [req.session.usuario.id]
@@ -476,37 +500,42 @@ app.post('/favoritar', checkAuth, async (req, res) => {
         usuario_id: req.session.usuario.id,
         total_atual: totalFavoritos,
         limite: 3,
-        filme_id,
-        titulo
+        filme_id: filmeIdNum,
+        titulo: titulo || 'Filme'
       });
 
       return res.redirect('/home?erro=' + encodeURIComponent('Limite de favoritos atingido (máx 3 para contas gratuitas). Assine o Plano Premium por R$ 9,90/mês para favoritar sem limites!'));
     }
 
+    const tituloSanitizado = (titulo || 'Filme').substring(0, 250);
+    const posterSanitizado = poster_path ? String(poster_path) : null;
+
     await pool.query(
-      'INSERT IGNORE INTO favoritos (usuario_id, filme_id, titulo, poster_path) VALUES (?, ?, ?, ?)',
-      [req.session.usuario.id, filme_id, titulo, poster_path]
+      'INSERT INTO favoritos (usuario_id, filme_id, titulo, poster_path) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE titulo = VALUES(titulo), poster_path = VALUES(poster_path)',
+      [req.session.usuario.id, filmeIdNum, tituloSanitizado, posterSanitizado]
     );
 
-    sendAuditLog(req, 'FAVORITAR_FILME', { filme_id, titulo, is_premium: isPremium });
-    res.redirect('/home');
+    sendAuditLog(req, 'FAVORITAR_FILME', { filme_id: filmeIdNum, titulo: tituloSanitizado, is_premium: isPremium });
+    res.redirect('/home?sucesso=' + encodeURIComponent('Filme favoritado com sucesso!'));
   } catch (error) {
     console.error('Erro ao favoritar:', error);
-    res.redirect('/home');
+    res.redirect('/home?erro=' + encodeURIComponent(`Erro ao salvar favorito: ${error.message}`));
   }
 });
 
 // Remover Favorito
 app.post('/desfavoritar', checkAuth, async (req, res) => {
   const { filme_id } = req.body;
+  const filmeIdNum = parseInt(filme_id, 10) || filme_id;
+
   try {
     await pool.query(
       'DELETE FROM favoritos WHERE usuario_id = ? AND filme_id = ?',
-      [req.session.usuario.id, filme_id]
+      [req.session.usuario.id, filmeIdNum]
     );
 
-    sendAuditLog(req, 'DESFAVORITAR_FILME', { filme_id });
-    res.redirect('/home');
+    sendAuditLog(req, 'DESFAVORITAR_FILME', { filme_id: filmeIdNum });
+    res.redirect('/home?sucesso=' + encodeURIComponent('Filme removido dos favoritos.'));
   } catch (error) {
     console.error('Erro ao desfavoritar:', error);
     res.redirect('/home');

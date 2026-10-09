@@ -207,7 +207,7 @@
         </div>
 
         <div>
-          <% if (favMap.has(filme.id)) { %>
+          <% if (favMap.has(String(filme.id)) || favMap.has(filme.id)) { %>
             <form action="/desfavoritar" method="POST" style="margin-bottom: 8px;">
               <input type="hidden" name="filme_id" value="<%= filme.id %>">
               <button type="submit" class="btn-fav fav-active" title="Clique para remover dos favoritos">★ Favoritado (Remover)</button>
@@ -223,9 +223,10 @@
 
           <div class="comentarios">
             <strong>Comentários:</strong>
-            <% if (commMap[filme.id] && commMap[filme.id].length > 0) { %>
+            <% const comms = commMap[String(filme.id)] || commMap[filme.id] || []; %>
+            <% if (comms && comms.length > 0) { %>
               <ul>
-                <% commMap[filme.id].forEach(c => { %>
+                <% comms.forEach(c => { %>
                   <li class="comm-item">
                     <span class="comm-text">
                       <% if (c.is_premium) { %>
