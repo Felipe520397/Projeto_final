@@ -592,23 +592,26 @@ app.post('/desfavoritar', checkAuth, async (req, res) => {
   try {
     const [cols] = await pool.query("SHOW COLUMNS FROM favoritos");
     const colNames = cols.map(c => c.Field);
+    const userCol = colNames.includes('usuario_id') ? 'usuario_id' : (colNames.includes('usuarioId') ? 'usuarioId' : 'user_id');
 
     const conditions = [];
     if (colNames.includes('filme_id')) conditions.push('filme_id = ?');
     if (colNames.includes('tmdb_movie_id')) conditions.push('tmdb_movie_id = ?');
     if (colNames.includes('tmdb_id')) conditions.push('tmdb_id = ?');
     if (colNames.includes('filmeId')) conditions.push('filmeId = ?');
+    if (colNames.includes('movie_id')) conditions.push('movie_id = ?');
 
     const params = [req.session.usuario.id];
     conditions.forEach(() => params.push(filmeIdNum));
 
-    await pool.query(`DELETE FROM favoritos WHERE usuario_id = ? AND (${conditions.join(' OR ')})`, params);
+    await pool.query(`DELETE FROM favoritos WHERE ${userCol} = ? AND (${conditions.join(' OR ')})`, params);
 
     sendAuditLog(req, 'DESFAVORITAR_FILME', { filme_id: filmeIdNum });
-    res.redirect('/home?sucesso=' + encodeURIComponent('Filme removido dos favoritos.'));
+    const redirectUrl = req.headers.referer || '/home?sucesso=' + encodeURIComponent('Filme removido dos favoritos.');
+    res.redirect(redirectUrl);
   } catch (error) {
     console.error('Erro ao desfavoritar:', error);
-    res.redirect('/home');
+    res.redirect(req.headers.referer || '/home');
   }
 });
 
@@ -730,16 +733,28 @@ app.get('/perfil', checkAuth, async (req, res) => {
 
     let favoritos = [];
     try {
+      // Identifica dinamicamente a coluna de usuário existente na tabela favoritos
+      const [favCols] = await pool.query("SHOW COLUMNS FROM favoritos");
+      const colFields = favCols.map(c => c.Field);
+      const userCol = colFields.includes('usuario_id') ? 'usuario_id' : (colFields.includes('usuarioId') ? 'usuarioId' : 'user_id');
+
       const [favRows] = await pool.query(
-        'SELECT * FROM favoritos WHERE usuario_id = ? OR usuarioId = ? ORDER BY id DESC',
-        [req.session.usuario.id, req.session.usuario.id]
+        `SELECT * FROM favoritos WHERE ${userCol} = ? ORDER BY id DESC`,
+        [req.session.usuario.id]
       );
-      favoritos = favRows.map(r => ({
-        filme_id: r.filme_id || r.tmdb_movie_id || r.tmdb_id || r.filmeId || r.id,
-        titulo: r.titulo || 'Filme',
-        poster_path: r.poster_path,
-        criado_em: r.criado_em || new Date()
-      }));
+      favoritos = favRows.map(r => {
+        let poster = r.poster_path || r.posterPath || r.poster || null;
+        if (poster && typeof poster === 'string' && !poster.startsWith('http') && poster.startsWith('/')) {
+          poster = `https://image.tmdb.org/t/p/w500${poster}`;
+        }
+        return {
+          id: r.id,
+          filme_id: r.filme_id || r.tmdb_movie_id || r.tmdb_id || r.filmeId || r.id,
+          titulo: r.titulo || r.title || 'Filme',
+          poster_path: poster,
+          criado_em: r.criado_em || new Date()
+        };
+      });
     } catch (favErr) {
       console.warn('[Perfil] Aviso favoritos:', favErr.message);
     }
@@ -795,16 +810,27 @@ app.get('/perfil/:id', checkAuth, async (req, res) => {
 
     let favoritos = [];
     try {
+      const [favCols] = await pool.query("SHOW COLUMNS FROM favoritos");
+      const colFields = favCols.map(c => c.Field);
+      const userCol = colFields.includes('usuario_id') ? 'usuario_id' : (colFields.includes('usuarioId') ? 'usuarioId' : 'user_id');
+
       const [favRows] = await pool.query(
-        'SELECT * FROM favoritos WHERE usuario_id = ? OR usuarioId = ? ORDER BY id DESC',
-        [id, id]
+        `SELECT * FROM favoritos WHERE ${userCol} = ? ORDER BY id DESC`,
+        [id]
       );
-      favoritos = favRows.map(r => ({
-        filme_id: r.filme_id || r.tmdb_movie_id || r.tmdb_id || r.filmeId || r.id,
-        titulo: r.titulo || 'Filme',
-        poster_path: r.poster_path,
-        criado_em: r.criado_em || new Date()
-      }));
+      favoritos = favRows.map(r => {
+        let poster = r.poster_path || r.posterPath || r.poster || null;
+        if (poster && typeof poster === 'string' && !poster.startsWith('http') && poster.startsWith('/')) {
+          poster = `https://image.tmdb.org/t/p/w500${poster}`;
+        }
+        return {
+          id: r.id,
+          filme_id: r.filme_id || r.tmdb_movie_id || r.tmdb_id || r.filmeId || r.id,
+          titulo: r.titulo || r.title || 'Filme',
+          poster_path: poster,
+          criado_em: r.criado_em || new Date()
+        };
+      });
     } catch (favErr) {
       console.warn('[Perfil Publico] Aviso favoritos:', favErr.message);
     }

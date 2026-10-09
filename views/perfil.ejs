@@ -243,19 +243,36 @@
       </div>
 
       <% if (favoritos.length === 0) { %>
-        <p style="color: #888; font-style: italic; margin-top: 20px;">
-          <%= isOwner ? 'Você ainda não favoritou nenhum filme do catálogo.' : 'Este usuário ainda não favoritou nenhum filme.' %>
-        </p>
+        <div style="text-align: center; padding: 30px 10px;">
+          <p style="color: #888; font-style: italic; margin-bottom: 15px;">
+            <%= isOwner ? 'Você ainda não favoritou nenhum filme do catálogo.' : 'Este usuário ainda não favoritou nenhum filme.' %>
+          </p>
+          <% if (isOwner) { %>
+            <a href="/home" class="btn-nav" style="display: inline-block; padding: 8px 16px; background: #e50914; color: #fff; border: none; font-weight: bold;">
+              🎬 Explorar Catálogo de Filmes →
+            </a>
+          <% } %>
+        </div>
       <% } else { %>
         <div class="fav-grid">
           <% favoritos.forEach(fav => { %>
             <div class="fav-card">
               <% if (fav.poster_path) { %>
-                <img src="<%= fav.poster_path %>" alt="<%= fav.titulo %>">
+                <img src="<%= fav.poster_path %>" alt="<%= fav.titulo %>" onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\'height: 220px; background: #333; display: flex; align-items: center; justify-content: center; font-size: 0.8em; color: #888;\'>Sem Foto</div>';">
               <% } else { %>
                 <div style="height: 220px; background: #333; display: flex; align-items: center; justify-content: center; font-size: 0.8em; color: #888;">Sem Foto</div>
               <% } %>
-              <h4><%= fav.titulo %></h4>
+              <div style="padding: 10px; display: flex; flex-direction: column; justify-content: space-between; flex-grow: 1;">
+                <h4 style="margin: 0 0 10px 0; font-size: 0.85em; text-align: center; color: #fff; line-height: 1.3;"><%= fav.titulo %></h4>
+                <% if (isOwner) { %>
+                  <form action="/desfavoritar" method="POST" style="margin: 0;">
+                    <input type="hidden" name="filme_id" value="<%= fav.filme_id %>">
+                    <button type="submit" style="width: 100%; background: #2a2a2a; color: #ff8080; border: 1px solid #444; padding: 6px; border-radius: 4px; font-size: 0.78em; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='#ff4d4d'; this.style.color='#fff';" onmouseout="this.style.background='#2a2a2a'; this.style.color='#ff8080';">
+                      🗑️ Remover
+                    </button>
+                  </form>
+                <% } %>
+              </div>
             </div>
           <% }) %>
         </div>
