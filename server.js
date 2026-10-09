@@ -130,14 +130,41 @@ async function initCatalogDb() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
-    // Garante que as colunas usuario_nome, bio e foto_url existam
+    // Garante que as colunas da tabela favoritos existam e estejam com os nomes corretos
     try {
-      try {
-        await conn.query("ALTER TABLE favoritos MODIFY COLUMN poster_path TEXT NULL");
-      } catch (favColErr) {
-        // ignora se já for compatível
+      const [favCols] = await conn.query("SHOW COLUMNS FROM favoritos");
+      const colFields = favCols.map(c => c.Field);
+
+      if (colFields.includes('filmeId') && !colFields.includes('filme_id')) {
+        await conn.query("ALTER TABLE favoritos CHANGE COLUMN filmeId filme_id INT NOT NULL");
+        console.log('[Catalog DB] Coluna "filmeId" renomeada para "filme_id" na tabela "favoritos".');
+      } else if (!colFields.includes('filme_id')) {
+        await conn.query("ALTER TABLE favoritos ADD COLUMN filme_id INT NOT NULL");
+        console.log('[Catalog DB] Coluna "filme_id" adicionada à tabela "favoritos".');
       }
 
+      if (colFields.includes('usuarioId') && !colFields.includes('usuario_id')) {
+        await conn.query("ALTER TABLE favoritos CHANGE COLUMN usuarioId usuario_id INT NOT NULL");
+        console.log('[Catalog DB] Coluna "usuarioId" renomeada para "usuario_id" na tabela "favoritos".');
+      } else if (!colFields.includes('usuario_id')) {
+        await conn.query("ALTER TABLE favoritos ADD COLUMN usuario_id INT NOT NULL");
+      }
+
+      if (!colFields.includes('titulo')) {
+        await conn.query("ALTER TABLE favoritos ADD COLUMN titulo VARCHAR(255) NULL");
+      }
+
+      if (!colFields.includes('poster_path')) {
+        await conn.query("ALTER TABLE favoritos ADD COLUMN poster_path TEXT NULL");
+      } else {
+        await conn.query("ALTER TABLE favoritos MODIFY COLUMN poster_path TEXT NULL");
+      }
+    } catch (favColErr) {
+      console.warn('[Catalog DB] Aviso ao verificar colunas de favoritos:', favColErr.message);
+    }
+
+    // Garante que as colunas usuario_nome, bio e foto_url existam
+    try {
       const [colsNome] = await conn.query("SHOW COLUMNS FROM comentarios LIKE 'usuario_nome'");
       if (colsNome.length === 0) {
         await conn.query("ALTER TABLE comentarios ADD COLUMN usuario_nome VARCHAR(255) DEFAULT 'Usuário'");
@@ -510,10 +537,33 @@ app.post('/favoritar', checkAuth, async (req, res) => {
     const tituloSanitizado = (titulo || 'Filme').substring(0, 250);
     const posterSanitizado = poster_path ? String(poster_path) : null;
 
-    await pool.query(
-      'INSERT INTO favoritos (usuario_id, filme_id, titulo, poster_path) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE titulo = VALUES(titulo), poster_path = VALUES(poster_path)',
-      [req.session.usuario.id, filmeIdNum, tituloSanitizado, posterSanitizado]
-    );
+    try {
+      await pool.query(
+        'INSERT INTO favoritos (usuario_id, filme_id, titulo, poster_path) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE titulo = VALUES(titulo), poster_path = VALUES(poster_path)',
+        [req.session.usuario.id, filmeIdNum, tituloSanitizado, posterSanitizado]
+      );
+    } catch (sqlInsertErr) {
+      if (sqlInsertErr.message && sqlInsertErr.message.includes('Unknown column')) {
+        console.warn('[Favoritar] Detectada coluna antiga na tabela favoritos. Aplicando migração de emergência...');
+        try {
+          await pool.query("ALTER TABLE favoritos CHANGE COLUMN filmeId filme_id INT NOT NULL");
+        } catch (e1) {
+          try { await pool.query("ALTER TABLE favoritos ADD COLUMN filme_id INT NOT NULL"); } catch (e2) {}
+        }
+        try {
+          await pool.query("ALTER TABLE favoritos CHANGE COLUMN usuarioId usuario_id INT NOT NULL");
+        } catch (e3) {
+          try { await pool.query("ALTER TABLE favoritos ADD COLUMN usuario_id INT NOT NULL"); } catch (e4) {}
+        }
+        // Tenta novamente a inserção após migrar
+        await pool.query(
+          'INSERT INTO favoritos (usuario_id, filme_id, titulo, poster_path) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE titulo = VALUES(titulo), poster_path = VALUES(poster_path)',
+          [req.session.usuario.id, filmeIdNum, tituloSanitizado, posterSanitizado]
+        );
+      } else {
+        throw sqlInsertErr;
+      }
+    }
 
     sendAuditLog(req, 'FAVORITAR_FILME', { filme_id: filmeIdNum, titulo: tituloSanitizado, is_premium: isPremium });
     res.redirect('/home?sucesso=' + encodeURIComponent('Filme favoritado com sucesso!'));
