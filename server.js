@@ -813,7 +813,11 @@ app.all(['/checkout/premium', '/checkout'], checkAuth, async (req, res) => {
   }
 
   try {
-    const baseUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+    // Determina a URL base usando o Host da requisição atual do usuário no navegador (garante o IP e porta corretos)
+    const hostHeader = req.get('x-forwarded-host') || req.get('host');
+    const protocolHeader = req.get('x-forwarded-proto') || req.protocol || 'http';
+    const baseUrl = hostHeader ? `${protocolHeader}://${hostHeader}`.replace(/\/$/, '') : (process.env.APP_URL || 'http://localhost:8204').replace(/\/$/, '');
+    console.log(`[Stripe Checkout] Base URL detectada para retorno: ${baseUrl}`);
 
     // Se houver STRIPE_PRICE_ID definido no ambiente, usa o Price ID configurado no painel;
     // Caso contrário, gera uma assinatura dinâmica inline no valor de R$ 9,90/mês.
