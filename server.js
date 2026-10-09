@@ -135,6 +135,14 @@ async function initCatalogDb() {
       const [favCols] = await conn.query("SHOW COLUMNS FROM favoritos");
       const colFields = favCols.map(c => c.Field);
 
+      // Permite NULL para colunas legadas tmdb_movie_id e tmdb_id
+      if (colFields.includes('tmdb_movie_id')) {
+        try { await conn.query("ALTER TABLE favoritos MODIFY COLUMN tmdb_movie_id INT NULL DEFAULT NULL"); } catch (e) {}
+      }
+      if (colFields.includes('tmdb_id')) {
+        try { await conn.query("ALTER TABLE favoritos MODIFY COLUMN tmdb_id INT NULL DEFAULT NULL"); } catch (e) {}
+      }
+
       if (colFields.includes('filmeId') && !colFields.includes('filme_id')) {
         await conn.query("ALTER TABLE favoritos CHANGE COLUMN filmeId filme_id INT NOT NULL");
         console.log('[Catalog DB] Coluna "filmeId" renomeada para "filme_id" na tabela "favoritos".');
@@ -414,10 +422,14 @@ app.get('/home', checkAuth, async (req, res) => {
     let favoritos = [];
     try {
       const [rows] = await pool.query(
-        'SELECT filme_id FROM favoritos WHERE usuario_id = ?',
+        'SELECT * FROM favoritos WHERE usuario_id = ?',
         [req.session.usuario.id]
       );
-      favoritos = rows;
+      favoritos = rows.map(r => ({
+        filme_id: r.filme_id || r.tmdb_movie_id || r.tmdb_id || r.filmeId || r.id,
+        titulo: r.titulo,
+        poster_path: r.poster_path
+      }));
     } catch (dbErr) {
       console.log('Aviso favoritos:', dbErr.message);
     }
@@ -537,33 +549,32 @@ app.post('/favoritar', checkAuth, async (req, res) => {
     const tituloSanitizado = (titulo || 'Filme').substring(0, 250);
     const posterSanitizado = poster_path ? String(poster_path) : null;
 
-    try {
-      await pool.query(
-        'INSERT INTO favoritos (usuario_id, filme_id, titulo, poster_path) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE titulo = VALUES(titulo), poster_path = VALUES(poster_path)',
-        [req.session.usuario.id, filmeIdNum, tituloSanitizado, posterSanitizado]
-      );
-    } catch (sqlInsertErr) {
-      if (sqlInsertErr.message && sqlInsertErr.message.includes('Unknown column')) {
-        console.warn('[Favoritar] Detectada coluna antiga na tabela favoritos. Aplicando migração de emergência...');
-        try {
-          await pool.query("ALTER TABLE favoritos CHANGE COLUMN filmeId filme_id INT NOT NULL");
-        } catch (e1) {
-          try { await pool.query("ALTER TABLE favoritos ADD COLUMN filme_id INT NOT NULL"); } catch (e2) {}
-        }
-        try {
-          await pool.query("ALTER TABLE favoritos CHANGE COLUMN usuarioId usuario_id INT NOT NULL");
-        } catch (e3) {
-          try { await pool.query("ALTER TABLE favoritos ADD COLUMN usuario_id INT NOT NULL"); } catch (e4) {}
-        }
-        // Tenta novamente a inserção após migrar
-        await pool.query(
-          'INSERT INTO favoritos (usuario_id, filme_id, titulo, poster_path) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE titulo = VALUES(titulo), poster_path = VALUES(poster_path)',
-          [req.session.usuario.id, filmeIdNum, tituloSanitizado, posterSanitizado]
-        );
-      } else {
-        throw sqlInsertErr;
-      }
-    }
+    // Preenchimento universal e dinâmico de todas as colunas existentes na tabela favoritos
+    const [cols] = await pool.query("SHOW COLUMNS FROM favoritos");
+    const colNames = cols.map(c => c.Field);
+
+    const insertData = {};
+    if (colNames.includes('usuario_id')) insertData.usuario_id = req.session.usuario.id;
+    if (colNames.includes('usuarioId')) insertData.usuarioId = req.session.usuario.id;
+
+    if (colNames.includes('filme_id')) insertData.filme_id = filmeIdNum;
+    if (colNames.includes('tmdb_movie_id')) insertData.tmdb_movie_id = filmeIdNum;
+    if (colNames.includes('tmdb_id')) insertData.tmdb_id = filmeIdNum;
+    if (colNames.includes('filmeId')) insertData.filmeId = filmeIdNum;
+    if (colNames.includes('movie_id')) insertData.movie_id = filmeIdNum;
+
+    if (colNames.includes('titulo')) insertData.titulo = tituloSanitizado;
+    if (colNames.includes('poster_path')) insertData.poster_path = posterSanitizado;
+
+    const keys = Object.keys(insertData);
+    const values = Object.values(insertData);
+    const placeholders = keys.map(() => '?').join(', ');
+    const updateClauses = keys.filter(k => !['id', 'criado_em'].includes(k)).map(k => `${k} = VALUES(${k})`).join(', ');
+
+    await pool.query(
+      `INSERT INTO favoritos (${keys.join(', ')}) VALUES (${placeholders}) ON DUPLICATE KEY UPDATE ${updateClauses}`,
+      values
+    );
 
     sendAuditLog(req, 'FAVORITAR_FILME', { filme_id: filmeIdNum, titulo: tituloSanitizado, is_premium: isPremium });
     res.redirect('/home?sucesso=' + encodeURIComponent('Filme favoritado com sucesso!'));
@@ -579,10 +590,19 @@ app.post('/desfavoritar', checkAuth, async (req, res) => {
   const filmeIdNum = parseInt(filme_id, 10) || filme_id;
 
   try {
-    await pool.query(
-      'DELETE FROM favoritos WHERE usuario_id = ? AND filme_id = ?',
-      [req.session.usuario.id, filmeIdNum]
-    );
+    const [cols] = await pool.query("SHOW COLUMNS FROM favoritos");
+    const colNames = cols.map(c => c.Field);
+
+    const conditions = [];
+    if (colNames.includes('filme_id')) conditions.push('filme_id = ?');
+    if (colNames.includes('tmdb_movie_id')) conditions.push('tmdb_movie_id = ?');
+    if (colNames.includes('tmdb_id')) conditions.push('tmdb_id = ?');
+    if (colNames.includes('filmeId')) conditions.push('filmeId = ?');
+
+    const params = [req.session.usuario.id];
+    conditions.forEach(() => params.push(filmeIdNum));
+
+    await pool.query(`DELETE FROM favoritos WHERE usuario_id = ? AND (${conditions.join(' OR ')})`, params);
 
     sendAuditLog(req, 'DESFAVORITAR_FILME', { filme_id: filmeIdNum });
     res.redirect('/home?sucesso=' + encodeURIComponent('Filme removido dos favoritos.'));
@@ -711,10 +731,15 @@ app.get('/perfil', checkAuth, async (req, res) => {
     let favoritos = [];
     try {
       const [favRows] = await pool.query(
-        'SELECT filme_id, titulo, poster_path, criado_em FROM favoritos WHERE usuario_id = ? ORDER BY criado_em DESC',
-        [req.session.usuario.id]
+        'SELECT * FROM favoritos WHERE usuario_id = ? OR usuarioId = ? ORDER BY id DESC',
+        [req.session.usuario.id, req.session.usuario.id]
       );
-      favoritos = favRows;
+      favoritos = favRows.map(r => ({
+        filme_id: r.filme_id || r.tmdb_movie_id || r.tmdb_id || r.filmeId || r.id,
+        titulo: r.titulo || 'Filme',
+        poster_path: r.poster_path,
+        criado_em: r.criado_em || new Date()
+      }));
     } catch (favErr) {
       console.warn('[Perfil] Aviso favoritos:', favErr.message);
     }
@@ -771,10 +796,15 @@ app.get('/perfil/:id', checkAuth, async (req, res) => {
     let favoritos = [];
     try {
       const [favRows] = await pool.query(
-        'SELECT filme_id, titulo, poster_path, criado_em FROM favoritos WHERE usuario_id = ? ORDER BY criado_em DESC',
-        [id]
+        'SELECT * FROM favoritos WHERE usuario_id = ? OR usuarioId = ? ORDER BY id DESC',
+        [id, id]
       );
-      favoritos = favRows;
+      favoritos = favRows.map(r => ({
+        filme_id: r.filme_id || r.tmdb_movie_id || r.tmdb_id || r.filmeId || r.id,
+        titulo: r.titulo || 'Filme',
+        poster_path: r.poster_path,
+        criado_em: r.criado_em || new Date()
+      }));
     } catch (favErr) {
       console.warn('[Perfil Publico] Aviso favoritos:', favErr.message);
     }
